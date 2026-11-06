@@ -1,0 +1,5 @@
+# Versions already inside the Isaac Lab image. pip must not replace these,
+# because Isaac Sim is built and tested against them.
+torch==2.7.0
+torchvision==0.22.0
+numpy==1.26.0
