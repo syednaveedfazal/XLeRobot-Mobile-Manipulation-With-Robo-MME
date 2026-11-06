@@ -1,7 +1,7 @@
 # XLeRobot-Mobile-Manipulation-With-Robo-MME
 
 Memory-dependent mobile manipulation on [XLeRobot](https://github.com/Vector-Wangel/XLeRobot)
-(sim + real), evaluated with π0.5 and GR00T. Uni Bonn, Robot Perception and Learning Lab.
+(sim + real), evaluated with π0.5. Uni Bonn, Robot Perception and Learning Lab.
 
 **Current state:** XLeRobot runs in ManiSkill (ReplicaCAD apartment) on the Marvin cluster and can be
 teleoperated from your browser with the keyboard or an Xbox (or any standard) gamepad.
