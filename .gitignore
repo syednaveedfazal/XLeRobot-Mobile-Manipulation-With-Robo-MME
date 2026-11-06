@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+logs/
+outputs/
+videos/
+*.mp4
+slurm-*.out
