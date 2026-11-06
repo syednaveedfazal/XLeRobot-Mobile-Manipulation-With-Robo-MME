@@ -1,0 +1,84 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# --- Environments (live in $XLE_WORK, never in the repo) ---
+.venv/
+venv/
+env/
+envs/
+.conda/
+conda-env/
+env.local.sh
+.env
+.env.*
+
+# --- Third-party clones (LeIsaac, IsaacLab, XLeRobot, lerobot) ---
+third_party/
+external/
+
+# --- Isaac Sim / Omniverse / Kit caches and logs ---
+.cache/
+.nv/
+.local/
+kit/
+ov/
+*.kit.log
+omni*.log
+
+# --- Large assets (built or downloaded by scripts in tools/ and setup/) ---
+assets/
+*.usd
+*.usda
+*.usdc
+*.usdz
+*.zip
+*.tar
+*.tar.gz
+*.sif
+*.img
+
+# --- Data, logs, outputs, checkpoints ---
+data/
+datasets/
+logs/
+outputs/
+results/raw/
+checkpoints/
+ckpt/
+wandb/
+runs/
+*.hdf5
+*.h5
+*.parquet
+*.mp4
+*.npz
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# --- Slurm / job output ---
+slurm-*.out
+slurm-*.err
+*.out
+nohup.out
+
+# --- Editors / OS ---
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# --- Keep these (small, committed on purpose) ---
+!docs/**
+!README.md
+!env.example.sh
