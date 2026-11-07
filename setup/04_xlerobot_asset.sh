@@ -3,7 +3,8 @@
 #
 # 1. Unpack XLeRobot's own model (body, cart, neck, head, virtual base joints).
 # 2. Download the official SO-101 arm model (URDF + meshes) at a pinned commit.
-# 3. Merge them into one URDF (plain Python), then convert it to USD (needs Isaac Sim).
+# 3. Merge them into one URDF (plain Python, login node is fine).
+# 4. Submit a GPU job that converts it to USD and builds the sandbox props.
 #
 # Run from the repo root:  bash setup/04_xlerobot_asset.sh
 
@@ -26,4 +27,7 @@ done
 echo "$SO101_COMMIT" > "$SO101_DIR/COMMIT"
 
 python3 tools/build_xlerobot_urdf.py
-slurm/in_container.sh /isaac-sim/python.sh tools/build_xlerobot_usd.py
+
+# Converting to USD and building the sandbox props start Isaac Sim, so they run as a GPU job.
+sbatch --output="$HOME/xle_asset_%j.out" slurm/sim_job.sbatch bash -c \
+    "/isaac-sim/python.sh tools/build_xlerobot_usd.py && /isaac-sim/python.sh tools/build_props_usd.py"

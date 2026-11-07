@@ -31,7 +31,7 @@ exec apptainer exec --nv --containall --writable-tmpfs \
     --env OMNI_KIT_ACCEPT_EULA=YES,ACCEPT_EULA=Y,PRIVACY_CONSENT=Y \
     --env PYTHONUSERBASE="$XLE_PYDEPS",PYTHONUNBUFFERED=1 \
     --env PATH="$XLE_PYDEPS/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
-    --env PIP_CACHE_DIR="$PIP_CACHE_DIR",HF_HOME="$HF_HOME",TORCH_HOME="$TORCH_HOME" \
+    --env PIP_CACHE_DIR="$PIP_CACHE_DIR",HF_HOME="$HF_HOME",TORCH_HOME="$TORCH_HOME",HF_LEROBOT_HOME="$HF_LEROBOT_HOME" \
     --env LEISAAC_ASSETS_ROOT="$LEISAAC_ASSETS_ROOT",XLE_WORK="$XLE_WORK",XLE_LOGS="$XLE_LOGS" \
     --env XLE_THIRD_PARTY="$XLE_THIRD_PARTY",XLE_DATA="$XLE_DATA",XLE_ASSETS="$XLE_ASSETS" \
     --pwd "$REPO" \

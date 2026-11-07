@@ -24,6 +24,7 @@ export XLE_CONTAINER_HOME=$XLE_WORK/container_home # $HOME inside the container
 # Tool caches
 export PIP_CACHE_DIR=$XLE_CACHE/pip
 export HF_HOME=$XLE_CACHE/huggingface
+export HF_LEROBOT_HOME=$XLE_DATA/lerobot      # LeRobot datasets: $HF_LEROBOT_HOME/<repo_id>
 export TORCH_HOME=$XLE_CACHE/torch
 export XDG_CACHE_HOME=$XLE_CACHE/xdg
 export APPTAINER_CACHEDIR=$XLE_CACHE/apptainer
