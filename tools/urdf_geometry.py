@@ -25,6 +25,21 @@ def transform(xyz=(0, 0, 0), rpy=(0, 0, 0)):
     return matrix
 
 
+def joint_motion(joint, value):
+    """4x4 motion of a revolute (rotation about its axis) or prismatic joint at `value`."""
+    matrix = np.eye(4)
+    if value == 0.0 or joint.get("type") == "fixed":
+        return matrix
+    axis = np.array([float(v) for v in joint.find("axis").get("xyz").split()])
+    axis = axis / np.linalg.norm(axis)
+    if joint.get("type") == "prismatic":
+        matrix[:3, 3] = axis * value
+        return matrix
+    k = np.array([[0, -axis[2], axis[1]], [axis[2], 0, -axis[0]], [-axis[1], axis[0], 0]])
+    matrix[:3, :3] = np.eye(3) + math.sin(value) * k + (1 - math.cos(value)) * (k @ k)  # Rodrigues
+    return matrix
+
+
 def origin_of(element):
     origin = element.find("origin")
     if origin is None:
@@ -42,18 +57,22 @@ class Urdf:
         self.links = {l.get("name"): l for l in self.root.findall("link")}
         self._joint_to_child = {j.find("child").get("link"): j for j in self.joints.values()}
 
-    def link_pose(self, link, root=None):
-        """Pose of a link frame in the root link's frame, with every joint at zero."""
+    def link_pose(self, link, root=None, q=None):
+        """Pose of a link frame in the root link's frame.
+
+        q: optional {joint name: angle in rad}; joints not listed are at zero.
+        """
+        q = q or {}
         matrix = np.eye(4)
         while link in self._joint_to_child and link != root:
             joint = self._joint_to_child[link]
-            matrix = origin_of(joint) @ matrix
+            matrix = origin_of(joint) @ joint_motion(joint, q.get(joint.get("name"), 0.0)) @ matrix
             link = joint.find("parent").get("link")
         return matrix
 
-    def joint_pose(self, name, root=None):
+    def joint_pose(self, name, root=None, q=None):
         joint = self.joints[name]
-        return self.link_pose(joint.find("parent").get("link"), root) @ origin_of(joint)
+        return self.link_pose(joint.find("parent").get("link"), root, q) @ origin_of(joint)
 
     def joint_axis(self, name, root=None):
         """(point, unit direction) of a joint axis in the root frame."""
