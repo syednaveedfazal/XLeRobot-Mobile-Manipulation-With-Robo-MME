@@ -93,4 +93,5 @@ def main():
 
 if __name__ == "__main__":
     main()
-    simulation_app.close()
+    # Kit can hang on shutdown with hand-built scenes, and nothing here needs a clean exit.
+    os._exit(0)

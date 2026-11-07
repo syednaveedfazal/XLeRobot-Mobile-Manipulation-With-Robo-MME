@@ -9,4 +9,4 @@ description = "XLeRobot support for LeIsaac"
 requires-python = ">=3.10"
 
 [tool.setuptools]
-packages = ["xle_leisaac"]
+packages = ["xle_leisaac", "xle_leisaac.robots", "xle_leisaac.tasks", "xle_leisaac.devices"]
