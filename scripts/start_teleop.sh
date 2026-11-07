@@ -3,13 +3,15 @@
 #   bash scripts/start_teleop.sh                      # 1 h on mlgpu_devel
 #   PARTITION=mlgpu_short TIME=04:00:00 bash scripts/start_teleop.sh
 #   bash scripts/start_teleop.sh --shader rt-fast     # extra args go to teleop_web.py
+#   SBATCH_SCRIPT=slurm/teleop_isaac.sbatch bash scripts/start_teleop.sh   # Isaac Lab version
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 mkdir -p logs
 PARTITION="${PARTITION:-mlgpu_devel}"
 TIME="${TIME:-01:00:00}"
 
-JOB=$(sbatch --parsable --partition="$PARTITION" --time="$TIME" scripts/teleop.sbatch "$@")
+SBATCH_SCRIPT="${SBATCH_SCRIPT:-scripts/teleop.sbatch}"  # Isaac Lab: slurm/teleop_isaac.sbatch
+JOB=$(sbatch --parsable --partition="$PARTITION" --time="$TIME" "$SBATCH_SCRIPT" "$@")
 LOG="logs/teleop-$JOB.out"
 echo "submitted job $JOB on $PARTITION ($TIME). log: $LOG"
 
