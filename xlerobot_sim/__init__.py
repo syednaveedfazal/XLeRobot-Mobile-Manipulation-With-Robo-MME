@@ -1,7 +1,8 @@
 """XLeRobot <-> ManiSkill glue.
 
 `import xlerobot_sim` registers, without touching the installed mani_skill package:
-  * agent  "xlerobot"               (dual-arm XLeRobot, from third_party/xlerobot_maniskill)
+  * agent  "xlerobot"               (dual-arm XLeRobot from third_party/xlerobot_maniskill, with the
+                                     mass/camera/control fixes of `xlerobot_sim.agent`)
   * scene  "XLeReplicaCAD"          (ReplicaCAD scene builder that knows how to place XLeRobot)
   * env    "XLeRobot-ReplicaCAD-v1" (ReplicaCAD apartment + XLeRobot, no task/reward)
 
@@ -10,10 +11,6 @@ The upstream XLeRobot instructions instead copy files into site-packages/mani_sk
 """
 
 from __future__ import annotations
-
-import importlib.util
-import sys
-from pathlib import Path
 
 import numpy as np
 import sapien
@@ -26,29 +23,12 @@ from mani_skill.utils.registration import register_env
 from mani_skill.utils.scene_builder.registration import register_scene_builder
 from mani_skill.utils.scene_builder.replicacad.scene_builder import ReplicaCADSceneBuilder
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-UPSTREAM_DIR = REPO_ROOT / "third_party" / "xlerobot_maniskill"
-XLEROBOT_URDF = UPSTREAM_DIR / "assets" / "xlerobot" / "xlerobot.urdf"
+from xlerobot_sim import layout
+from xlerobot_sim.agent import XLeRobot
+
+Xlerobot = XLeRobot  # backwards-compatible name
 
 ENV_ID = "XLeRobot-ReplicaCAD-v1"
-
-
-def _load_upstream_agent():
-    """Import the vendored agent module (its @register_agent registers uid 'xlerobot')."""
-    name = "xlerobot_sim._upstream_xlerobot_agent"
-    if name in sys.modules:
-        return sys.modules[name]
-    path = UPSTREAM_DIR / "agents" / "xlerobot" / "xlerobot.py"
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    # upstream expects the URDF inside mani_skill's package assets; point it at our copy instead
-    module.Xlerobot.urdf_path = str(XLEROBOT_URDF)
-    return module
-
-
-Xlerobot = _load_upstream_agent().Xlerobot
 
 
 @register_scene_builder("XLeReplicaCAD")
@@ -89,4 +69,4 @@ class XLeRobotSceneEnv(SceneManipulationEnv):
         return [CameraConfig("render_camera", pose, 640, 480, 1.2, 0.01, 100, mount=self.agent.top_base_link)]
 
 
-__all__ = ["ENV_ID", "Xlerobot", "XLeReplicaCADSceneBuilder", "XLeRobotSceneEnv"]
+__all__ = ["ENV_ID", "XLeRobot", "Xlerobot", "layout", "XLeReplicaCADSceneBuilder", "XLeRobotSceneEnv"]

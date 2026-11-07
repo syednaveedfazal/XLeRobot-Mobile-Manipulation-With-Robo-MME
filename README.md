@@ -11,7 +11,9 @@ teleoperated from your browser with the keyboard or an Xbox (or any standard) ga
 ```
 setup/install.sh, env.sh, requirements.txt   one-time install / activate the environment
 xlerobot_sim/__init__.py                     registers agent "xlerobot" + env "XLeRobot-ReplicaCAD-v1"
-xlerobot_sim/teleop_controller.py            keyboard / gamepad -> command -> 16-dim action
+xlerobot_sim/agent.py                        upstream agent + fixes so it matches the real robot (see below)
+xlerobot_sim/layout.py                       real-robot action/state order (17 keys) and sim joint mapping
+xlerobot_sim/teleop_controller.py            keyboard / gamepad -> command -> 17-dim action
 xlerobot_sim/teleop_web.py                   headless sim + browser teleop server
 scripts/start_teleop.sh, teleop.sbatch       launch teleop as a Slurm job
 scripts/relay.py                             login-node relay so VS Code can forward the page
@@ -81,6 +83,7 @@ layout works the same way, e.g. PlayStation or Switch Pro.
 | Gamepad | Action |
 |---|---|
 | D-pad | base forward/back, turn left/right |
+| View (⧉) + D-pad left/right | base slide left/right |
 | Right stick | arm 1 (right) end effector up-down / forward-back |
 | RB + right stick | arm 1 wrist pitch / roll |
 | R3 (click) + right stick | arm 1 shoulder rotation |
@@ -102,6 +105,7 @@ the Joy-Con mapping will be built from.
 | Keys | Action |
 |---|---|
 | W / S, A / D | base forward/back, turn left/right |
+| Q / E | base slide left/right |
 | 8 / U, 9 / I | arm 1 end-effector up/down, forward/back |
 | 7 / Y, 0 / O, - / P | arm 1 shoulder rotation, wrist pitch, wrist roll |
 | J / M, K / , | arm 2 end-effector up/down, forward/back |
@@ -126,8 +130,54 @@ sbatch -p mlgpu_devel --gres=gpu:1 -c 8 --mem=32G -t 00:20:00 -o logs/smoke-%j.o
 ```python
 import gymnasium as gym, xlerobot_sim
 env = gym.make("XLeRobot-ReplicaCAD-v1", obs_mode="rgb",
-               control_mode="pd_joint_delta_pos_dual_arm", render_mode="rgb_array")
+               control_mode="pd_joint_pos_real_layout", render_mode="rgb_array")
+obs["agent"]["state_real_layout"]   # (num_envs, 17), same order as the action
 ```
+
+## How the sim model matches the real robot
+
+`xlerobot_sim/agent.py` subclasses the vendored upstream agent; the files in `third_party/` stay
+unmodified. Compared with upstream:
+
+| | upstream ManiSkill model | now | real XLeRobot |
+|---|---|---|---|
+| mass | 79.3 kg (base_link 70.1 kg) | 12.3 kg | ~12 kg |
+| cameras | head 256x256, wrists 128x128 | all 640x480; head 69° / wrists 120° horizontal FOV | 640x480 |
+| action (`pd_joint_pos_real_layout`) | 16-dim, base first, right arm first, deltas | 17-dim in the real key order | 17 keys |
+| base | forward + turn only, up to 1 m/s | x, y, yaw velocity in the robot frame, clamped to 0.3 m/s, 90°/s | omni wheels, fastest preset 0.3 m/s, 90°/s |
+
+Action / state order (`xlerobot_sim.layout.ACTION_KEYS`): left arm `shoulder_pan, shoulder_lift,
+elbow_flex, wrist_flex, wrist_roll, gripper` (0-5), right arm (6-11), head pan, tilt (12-13),
+`x.vel, y.vel, theta.vel` (14-16).
+
+The upstream 16-dim modes (e.g. `pd_joint_delta_pos_dual_arm`) are still available and unchanged.
+
+### Things to look out for
+
+Still open. Check these before you mix sim data with real-robot data or train on it.
+
+- **Arm zero points don't match the real arm.** The sim arm is the older SO-100-style URDF (shoulder
+  lift -0.1..3.45 rad, elbow -0.2..3.14 rad; the rest pose has both near 3.14). The real SO-101 is
+  calibrated around zero (lift ±100°, elbow ±96.8°, wrist roll -157°..163°). The same number means a
+  different arm pose in sim and on the robot. **To do:** swap in the official SO-101 arm (as the
+  Isaac build does) or write a per-joint offset/sign table from the SO-101 URDF. Don't guess the
+  table; a wrong one silently corrupts every converted episode.
+- **Units differ.** Sim joints are radians; the real robot reports -100..100 (gripper 0..100), or
+  degrees with `use_degrees=True`. `theta.vel` is rad/s in sim and deg/s on the real robot. `x.vel`
+  and `y.vel` are m/s in both.
+- **Head motor order is a guess.** `head_motor_1` = pan and `head_motor_2` = tilt is assumed in
+  `xlerobot_sim/layout.py`. **To do:** move each head motor on the real robot and fix the mapping if
+  it's the other way round.
+- **Isaac model not updated.** The Isaac model (`xle_leisaac`, not in this repo) still has an
+  unclamped base (velocity limit 100) and 640x360 cameras. **To do:** clamp the base to 0.3 m/s and
+  90°/s, and pick one camera size (640x480 like the real cameras) for both sims.
+- **Wrist camera images are rotated about 90°.** This comes from upstream's camera mount on the
+  gripper (wrist roll rests at 1.57 rad). It was easy to miss at the old 128x128. **To do:** check it
+  against a real wrist-camera frame and rotate the sim mount or the image to match.
+- **Teleop feels different from before.** Teleop now sends absolute joint targets (at most 0.1 rad
+  change per step) instead of P-controlled deltas. The gripper opens wider (1.7 rad, the jaw limit)
+  and the base moves at the real "slow" preset. Expect slightly different arm and gripper behaviour
+  from earlier sessions.
 
 ## Notes
 
@@ -138,5 +188,7 @@ env = gym.make("XLeRobot-ReplicaCAD-v1", obs_mode="rgb",
 - **Upstream pygame demos** (`third_party/xlerobot_maniskill/examples/`) open a local window and the
   SAPIEN viewer. They need a real desktop session, so they don't run in a plain Slurm job.
 - **Changes from upstream:** the third-person camera follows from behind instead of facing the robot.
+  Teleop sends absolute joint targets (rate-limited to 0.1 rad per step) and base velocities instead of
+  P-controlled deltas; base speeds are the real robot's "slow" preset (0.1 m/s, 30°/s).
   Key X keeps the base heading instead of turning the robot back to 0. Grippers start open, and keyboard
   V/B toggles them closed.
