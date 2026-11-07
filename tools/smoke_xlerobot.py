@@ -151,7 +151,8 @@ def main():
     print(f"[xsmoke] base error {error_m * 100:.2f} cm, {error_deg:.2f} deg")
 
     # Arms: three poses for each arm (shoulder pan, lift, elbow, wrist pitch, wrist roll).
-    poses = [(0.0, 1.57, 1.57, 0.0, 1.57), (0.5, 1.0, 1.2, 0.5, 0.0), (-0.5, 0.4, 0.6, -0.4, 1.57)]
+    # SO-101 "new_calib": all zeros is the middle of every joint's range.
+    poses = [(0.0, 0.0, 0.0, 0.0, 0.0), (0.5, -0.5, 0.6, 0.6, 0.0), (-0.5, -1.0, 1.2, 0.8, 1.0)]
     worst = 0.0
     for arm_name, joints in (("left", LEFT_ARM_JOINTS), ("right", RIGHT_ARM_JOINTS)):
         for i, pose in enumerate(poses):
