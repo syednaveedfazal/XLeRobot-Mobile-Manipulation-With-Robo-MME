@@ -18,6 +18,7 @@ here just means "the episode was recorded completely".
 
 import argparse
 import os
+import sys
 
 from isaaclab.app import AppLauncher
 
@@ -87,7 +88,8 @@ def main():
     env_cfg.terminations.success = DoneTerm(func=routine_finished)
     env_cfg.recorders.dataset_export_dir_path = os.path.dirname(args.dataset_file)
     env_cfg.recorders.dataset_filename = os.path.splitext(os.path.basename(args.dataset_file))[0]
-    env_cfg.recorders.dataset_export_mode = DatasetExportMode.EXPORT_SUCCEEDED_ONLY
+    # LeIsaac's streaming recorder only supports EXPORT_ALL; the converter keeps only "successful" episodes.
+    env_cfg.recorders.dataset_export_mode = DatasetExportMode.EXPORT_ALL
 
     env = gym.make(TASK, cfg=env_cfg).unwrapped
     del env.recorder_manager  # swap in LeIsaac's streaming recorder, as its teleop script does
@@ -125,5 +127,14 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
-    simulation_app.close()
+    # Fail fast: if anything raises, print it and exit now. Otherwise Kit can hang on
+    # shutdown and the job sits idle until its time limit.
+    try:
+        main()
+    except BaseException:
+        import traceback
+
+        traceback.print_exc()
+        sys.stdout.flush()
+        os._exit(1)
+    os._exit(0)

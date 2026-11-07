@@ -11,6 +11,7 @@ the dataset really describes what the robot did.
 
 import argparse
 import os
+import sys
 
 from isaaclab.app import AppLauncher
 
@@ -65,5 +66,14 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
-    simulation_app.close()
+    # Fail fast: if anything raises, print it and exit now. Otherwise Kit can hang on
+    # shutdown and the job sits idle until its time limit.
+    try:
+        main()
+    except BaseException:
+        import traceback
+
+        traceback.print_exc()
+        sys.stdout.flush()
+        os._exit(1)
+    os._exit(0)

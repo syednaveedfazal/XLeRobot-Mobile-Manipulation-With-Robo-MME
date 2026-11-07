@@ -131,6 +131,38 @@ starts are faster.
 
 ---
 
+### C. Browser teleop: drive it yourself with keyboard or Xbox gamepad
+
+The same browser page as the ManiSkill teleop (Part B), now driving the Isaac Lab sandbox:
+
+```bash
+cd ~/RLP/XLeRobot-Mobile-Manipulation-With-Robo-MME
+bash scripts/start_teleop_isaac.sh                                   # 1 h on mlgpu_devel
+PARTITION=mlgpu_short TIME=04:00:00 bash scripts/start_teleop_isaac.sh   # longer session
+```
+
+Run it from the **VS Code terminal**. It submits the job, waits for Isaac Sim to start (a few
+minutes), then prints a URL like `http://localhost:22874/?token=...`. Open it in your laptop's
+browser; VS Code forwards the port (check the **Ports** tab). Stop with `scancel <job>`.
+
+Controls are the ones listed under Part B (keyboard and gamepad), plus:
+
+| Input | Action |
+| --- | --- |
+| Q / E | base strafe left / right (the real omni base can) |
+| 1 / 2 / 3 | speed slow / medium / fast (real robot: 0.1/0.2/0.3 m/s, 30/60/90 deg/s) |
+| Gamepad View + D-pad left/right | base strafe |
+
+Arm "end-effector up/down/forward" uses IK computed from the official SO-101 URDF. The robot
+receives the same 17 action values as the real robot.
+
+Check without a browser (scripted keys, prints `SELFTEST PASSED`, frames in `logs/teleop_selftest/`):
+
+```bash
+sbatch --output=$HOME/xle_tsel_%j.out slurm/sim_job.sbatch \
+    /isaac-sim/python.sh -m xle_leisaac.teleop.isaac_teleop_web --selftest
+```
+
 ## 4. What you can run
 
 All results land in `$XLE_LOGS` = `/lustre/scratch/data/<user>-xle_sim/logs/`.
@@ -142,10 +174,10 @@ All results land in `$XLE_LOGS` = `/lustre/scratch/data/<user>-xle_sim/logs/`.
 | `tools/render_usd.py <file.usd> --enable_cameras` | Pictures of any robot USD from 4 sides | `logs/render/` |
 | `tools/inspect_usd.py <file.usd>` | Prints joints, limits, masses of a USD | log only |
 | `tools/check_workspace.py` | Robot size, reach and mass vs the real XLeRobot | log only |
-| ⏳ `tools/record_scripted.py --enable_cameras --episodes 5` | Records 5 scripted sandbox episodes to HDF5 | `data/hdf5/xle_sandbox_v0.hdf5` |
-| ⏳ `tools/convert_to_lerobot.py --overwrite` | HDF5 to LeRobot v3 dataset | `data/lerobot/local/xle_sandbox_v0/` |
-| ⏳ `tools/check_dataset.py` | Loads the dataset with lerobot, prints features and ranges, one MP4 per episode | `logs/dataset_check/` |
-| ⏳ `tools/replay_episode.py --enable_cameras --episode 0` | Replays a recorded episode and checks the sim repeats it | log only |
+| `tools/record_scripted.py --enable_cameras --episodes 5` | Records 5 scripted sandbox episodes to HDF5 | `data/hdf5/xle_sandbox_v0.hdf5` |
+| `tools/convert_to_lerobot.py --overwrite` | HDF5 to LeRobot v3 dataset | `data/lerobot/local/xle_sandbox_v0/` |
+| `tools/check_dataset.py` | Loads the dataset with lerobot, prints features and ranges, one MP4 per episode | `logs/dataset_check/` |
+| `tools/replay_episode.py --enable_cameras --episode 0` | Replays a recorded episode and checks the sim repeats it | log only |
 
 Example, the whole data pipeline in one job:
 
@@ -174,9 +206,9 @@ grep -E '\[xsmoke\]|\[record\]|\[check\]|Error' ~/xle_sim_<jobid>.out
   scp -r <user>@marvin.hpc.uni-bonn.de:/lustre/scratch/data/<user>-xle_sim/logs/smoke_xlerobot .
   ```
 
-- **A live window** (watching or driving the sim in real time) needs Isaac Sim's WebRTC
-  livestream through an SSH tunnel. This is not set up yet. Until then, the keyboard
-  teleop in `xle_leisaac/devices/xlerobot_keyboard.py` cannot be used.
+- **Recorded dataset videos:** `logs/dataset_check/episode_*.mp4`, the three cameras side by side.
+- **Live, while driving:** use the browser teleop (section 3C). It streams the chase, head and
+  both wrist cameras to your browser.
 
 ---
 

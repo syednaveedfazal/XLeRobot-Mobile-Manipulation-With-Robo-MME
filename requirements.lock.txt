@@ -19,7 +19,7 @@ multiprocess==0.70.16
 mypy_extensions==1.2.0
 orderly-set==5.5.0
 pfzy==0.3.4
-pyarrow==26.0.1
+pyarrow==21.0.0
 pygame==2.6.1
 pynput==1.8.2
 pyserial==3.5
