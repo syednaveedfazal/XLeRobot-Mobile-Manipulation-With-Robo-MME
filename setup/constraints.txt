@@ -3,3 +3,6 @@
 torch==2.7.0
 torchvision==0.22.0
 numpy==1.26.0
+# pyarrow (needed by lerobot -> datasets, which wants >=21) dropped NumPy 1.x support in later
+# versions; 21.0.0 still works with the image's NumPy 1.26.
+pyarrow==21.0.0
