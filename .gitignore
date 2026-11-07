@@ -22,7 +22,10 @@ env.local.sh
 .env.*
 
 # --- Third-party clones (LeIsaac, IsaacLab, XLeRobot, lerobot) ---
-third_party/
+# Clones live in $XLE_WORK/third_party. The one exception is the small, vendored
+# XLeRobot ManiSkill copy used by the ManiSkill sim (see its UPSTREAM.md).
+/third_party/*
+!/third_party/xlerobot_maniskill/
 external/
 
 # --- Isaac Sim / Omniverse / Kit caches and logs ---
@@ -56,6 +59,7 @@ checkpoints/
 ckpt/
 wandb/
 runs/
+videos/
 *.hdf5
 *.h5
 *.parquet
@@ -82,3 +86,7 @@ nohup.out
 !docs/**
 !README.md
 !env.example.sh
+
+# The vendored ManiSkill copy must stay visible even though it contains assets/ and meshes.
+!/third_party/xlerobot_maniskill/**/
+!/third_party/xlerobot_maniskill/**
