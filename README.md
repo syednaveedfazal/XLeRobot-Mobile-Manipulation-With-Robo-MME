@@ -163,6 +163,61 @@ sbatch --output=$HOME/xle_tsel_%j.out slurm/sim_job.sbatch \
     /isaac-sim/python.sh -m xle_leisaac.teleop.isaac_teleop_web --selftest
 ```
 
+### D. Joy-Con in the lab (XLeRobot's own Joy-Con code drives the sim)
+
+The lab laptop runs XLeRobot's real-robot Joy-Con teleop (`examples/7_xlerobot_teleop_joycon.py`)
+**unchanged**, but sends its actions to the sim instead of the robot. The sim converts them with
+the arm calibration in `calibration/`, so it reacts as the real robot would.
+
+On the **lab laptop** (Linux, the same Python env you use for the real XLeRobot: `lerobot`,
+XLeRobot's `xlerobot_model` + `lerobot_robot_xlerobot` plugins, and `joycon-robotics`):
+
+1. Pair both Joy-Cons (XLeRobot docs: hold sync, pair in Bluetooth settings, press L + R).
+2. On Marvin (VS Code terminal): `bash scripts/start_teleop_isaac.sh`, and wait for the URL.
+3. On the laptop, open the tunnel the script prints (`ssh -N -L <port>:localhost:<port> ...`).
+4. On the laptop, start the Joy-Con client with that URL:
+   ```bash
+   python tools/joycon_sim_client.py --url "http://localhost:<port>/?token=<token>" --xlerobot ~/XLeRobot
+   ```
+5. Open the same URL in the laptop's browser to watch the four cameras.
+
+Controls are XLeRobot's, so they match the real robot:
+
+| Joy-Con | Action |
+| --- | --- |
+| Right / left stick | right / left arm: up-down on the stick moves the end effector forward-back and up-down together; left-right turns the shoulder (pan) |
+| R / L, and R-stick / L-stick click | arm up / down |
+| ZR / ZL (hold) | gripper; each new press flips between closing and opening |
+| Tilt the Joy-Con | wrist pitch and roll |
+| Right X / B, Y / A | base: **X drives backward and B forward** in XLeRobot's code (its comments say the opposite); Y / A turn |
+| Left D-pad | head |
+| Right + | arms and head back to the zero pose (Home / Capture resets that Joy-Con's target) |
+
+When the Joy-Con client stops, keyboard and gamepad on the page take over again.
+
+Test without Joy-Cons (scripted fake Joy-Cons, inside a GPU job):
+```bash
+python tools/joycon_sim_client.py --url ... --xlerobot $XLE_THIRD_PARTY/XLeRobot --fake --seconds 20
+```
+
+### E. Xbox controller from an interactive job (view the results live)
+
+```bash
+cd ~/RLP/XLeRobot-Mobile-Manipulation-With-Robo-MME
+bash slurm/sim_interactive.sh                          # waits for an A40, gives a shell in the container
+/isaac-sim/python.sh -m xle_leisaac.teleop.isaac_teleop_web    # prints "Teleop server on <node>:<port>" and the URL
+```
+
+In a second VS Code terminal on the **login node**, relay the port, then open the printed URL in
+your browser and press a button on the Xbox controller:
+
+```bash
+python3 scripts/relay.py <node> <port>       # e.g. mlgpu003 22231; VS Code forwards localhost:<port>
+```
+
+`Ctrl+C` in the first terminal stops the sim; `exit` ends the job. `bash scripts/start_teleop_isaac.sh`
+does the same thing in one step as a batch job.
+
 ## 4. What you can run
 
 All results land in `$XLE_LOGS` = `/lustre/scratch/data/<user>-xle_sim/logs/`.

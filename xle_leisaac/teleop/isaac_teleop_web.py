@@ -9,6 +9,13 @@ unchanged; only the simulator loop is different:
                          -> XLeRobot-Sandbox-v0 in Isaac Lab
                          -> camera frames -> JPEG -> browser
 
+It also speaks the real robot's language, so real-robot teleop code can drive the sim:
+    POST /action       {"action": {"left_arm_shoulder_pan.pos": ..., "x.vel": ..., ...}}
+                       the real XLeRobot's action dict (LeRobot units); converted with the
+                       arm calibration. Takes priority over keyboard/gamepad while it keeps
+                       arriving (tools/joycon_sim_client.py sends it from XLeRobot's Joy-Con code).
+    GET  /observation  the sim's state as the real robot's observation dict (LeRobot units).
+
 Start it with scripts/start_teleop_isaac.sh (submits the job and sets up the relay), or by
 hand inside a GPU job:
 
@@ -19,12 +26,14 @@ robot moved the right way, saves the frames and exits.
 """
 
 import argparse
+import json
 import os
 import sys
 import secrets
 import socket
 import threading
 import time
+from urllib.parse import urlparse
 
 from isaaclab.app import AppLauncher
 
@@ -53,7 +62,12 @@ from isaaclab.sensors import TiledCameraCfg  # noqa: E402
 from isaaclab_tasks.utils import parse_env_cfg  # noqa: E402
 
 import xle_leisaac  # noqa: F401, E402  (registers XLeRobot-Sandbox-v0)
-from xle_leisaac.robots.xlerobot import REST_ARM_POSE  # noqa: E402
+from xle_leisaac.robots.xlerobot import (  # noqa: E402
+    REST_ARM_POSE,
+    XLEROBOT_ACTION_KEYS,
+    lerobot_to_sim_action,
+    sim_to_lerobot_action,
+)
 from xle_leisaac.teleop.command_to_action import JOINTS, IsaacTeleopAdapter  # noqa: E402  (also loads xlerobot_sim)
 from xlerobot_sim import teleop_web as web  # noqa: E402
 from xlerobot_sim.teleop_controller import GAMEPAD_HELP, KEY_HELP, gamepad_command, keyboard_command  # noqa: E402
@@ -80,9 +94,41 @@ def build_page(token):
             .replace("__PAD__", web._help_rows(GAMEPAD_HELP + EXTRA_PAD)))
 
 
+REAL_ACTION_TIMEOUT = 0.5  # s without a new /action -> back to keyboard/gamepad
+
+
+def make_handler(state, token, page):
+    """The ManiSkill page's HTTP handler, plus /action and /observation for real-robot code."""
+    base = web.make_handler(state, token, page)
+
+    class Handler(base):
+        def do_GET(self):
+            if urlparse(self.path).path == "/observation":
+                if self._authorized():
+                    with state.lock:
+                        body = json.dumps(state.observation).encode()
+                    self._send(200, body, "application/json")
+                return
+            super().do_GET()
+
+        def do_POST(self):
+            if urlparse(self.path).path == "/action":
+                if self._authorized():
+                    data = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+                    with state.lock:
+                        state.real_action = data.get("action", {})
+                        state.real_action_time = time.time()
+                        state.real_action_source = data.get("source", "client")
+                    self._send(200, b"{}", "application/json")
+                return
+            super().do_POST()
+
+    return Handler
+
+
 def start_server(state):
     token = args.token or secrets.token_urlsafe(12)
-    handler = web.make_handler(state, token, build_page(token))
+    handler = make_handler(state, token, build_page(token))
     first = args.port or 20000 + os.getuid() % 20000
     for port in range(first, first + 20):
         try:
@@ -113,6 +159,8 @@ def selftest_input(step):
 
 def main():
     state = web.SharedState()
+    state.real_action, state.real_action_time, state.real_action_source = {}, 0.0, None
+    state.observation = {}
     server = None if args.selftest else start_server(state)
 
     env_cfg = parse_env_cfg(args.task, device=args.device, num_envs=1)
@@ -134,6 +182,7 @@ def main():
     dt_min = 1.0 / args.max_fps
     t_prev, fps, step = time.time(), 0.0, 0
     prev_pad_buttons = []
+    driven_externally = False  # True while /action is driving the robot
     start_pose = robot.data.joint_pos[0, :3].clone()
     try:
         while simulation_app.is_running():
@@ -163,10 +212,28 @@ def main():
             elif pad:
                 pad_info = f"unsupported layout ({pad.get('mapping') or 'non-standard'}): {pad.get('id')}"
 
-            action = adapter.step(cmd, pressed=pressed, edges=edges, gamepad=pad)
+            with state.lock:
+                real = dict(state.real_action) if t0 - state.real_action_time < REAL_ACTION_TIMEOUT else None
+                source = state.real_action_source
+            if real:
+                # A real-robot action dict (e.g. from XLeRobot's Joy-Con code): fill in any key it
+                # leaves out from the current state (positions) or zero (base speeds), then convert.
+                current_real = dict(zip(XLEROBOT_ACTION_KEYS, sim_to_lerobot_action(current_state()[None])[0]))
+                values = [real.get(k, 0.0 if k.endswith(".vel") else current_real[k]) for k in XLEROBOT_ACTION_KEYS]
+                action = lerobot_to_sim_action(np.array([values]))[0].astype(np.float32)
+                pad_info = f"real-robot actions from {source}"
+                driven_externally = True
+            else:
+                if driven_externally:
+                    adapter.reset(current_state())  # take over from where the external driver left the robot
+                driven_externally = False
+                action = adapter.step(cmd, pressed=pressed, edges=edges, gamepad=pad)
             with torch.inference_mode():
                 obs, *_ = env.step(torch.as_tensor(action, device=env.device).unsqueeze(0))
             step += 1
+            observation = dict(zip(XLEROBOT_ACTION_KEYS, (float(v) for v in sim_to_lerobot_action(current_state()[None])[0])))
+            with state.lock:
+                state.observation = observation
 
             frames = {name: web.to_uint8_image(env.scene[sensor].data.output["rgb"]) for name, sensor in STREAMS.items()}
             jpgs = {k: cv2.imencode(".jpg", cv2.cvtColor(v, cv2.COLOR_RGB2BGR), enc)[1].tobytes() for k, v in frames.items()}
