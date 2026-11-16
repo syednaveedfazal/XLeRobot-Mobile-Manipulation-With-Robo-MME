@@ -21,8 +21,15 @@ hand inside a GPU job:
 
     slurm/in_container.sh /isaac-sim/python.sh -m xle_leisaac.teleop.isaac_teleop_web --enable_cameras
 
---selftest drives a fixed key sequence instead of waiting for a browser, checks that the
-robot moved the right way, saves the frames and exits.
+An SO-101 leader arm can drive one or both sim arms: run scripts/leader_client.py on the
+computer the leader is plugged into. Its servo readings are posted to /leader and turned
+into joint angles with LeRobot calibration files (leader_arm.py). While leader data
+arrives, that arm follows the leader; when it stops for 0.5 s, keys and gamepad take over
+again from the current pose.
+
+--selftest drives a fixed key sequence instead of waiting for a browser, then a scripted
+Xbox gamepad sequence and a leader-arm pose, checks that the robot moved the right way,
+saves the frames and exits.
 """
 
 import argparse
@@ -47,6 +54,9 @@ parser.add_argument("--deadzone", type=float, default=0.15)
 parser.add_argument("--token", default=None)
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--selftest", action="store_true", help="scripted keys, no browser; prints PASS/FAIL")
+parser.add_argument("--leader_calibration", default="calibration/my_leader.json",
+                    help="SO-101 leader arm calibration (LeRobot format), relative to the repo. The sim arms "
+                         "use the follower calibration in xle_leisaac/robots/calibration.py (ARM_CALIBRATION_FILES)")
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
 args.headless = True
@@ -58,17 +68,20 @@ import gymnasium as gym  # noqa: E402
 import isaaclab.sim as sim_utils  # noqa: E402
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
+from isaaclab.managers import RecorderManagerBaseCfg  # noqa: E402
 from isaaclab.sensors import TiledCameraCfg  # noqa: E402
 from isaaclab_tasks.utils import parse_env_cfg  # noqa: E402
 
 import xle_leisaac  # noqa: F401, E402  (registers XLeRobot-Sandbox-v0)
 from xle_leisaac.robots.xlerobot import (  # noqa: E402
+    ARM_CALIBRATION,
     REST_ARM_POSE,
     XLEROBOT_ACTION_KEYS,
     lerobot_to_sim_action,
     sim_to_lerobot_action,
 )
-from xle_leisaac.teleop.command_to_action import JOINTS, IsaacTeleopAdapter  # noqa: E402  (also loads xlerobot_sim)
+from xle_leisaac.teleop.command_to_action import JOINTS, REPO, IsaacTeleopAdapter  # noqa: E402  (also loads xlerobot_sim)
+from xle_leisaac.teleop.leader_arm import HOMED_TICKS, TICKS_PER_TURN, LeaderToSim, load_calibration  # noqa: E402
 from xlerobot_sim import teleop_web as web  # noqa: E402
 from xlerobot_sim.teleop_controller import GAMEPAD_HELP, KEY_HELP, gamepad_command, keyboard_command  # noqa: E402
 
@@ -157,6 +170,42 @@ def selftest_input(step):
     return pressed, edges
 
 
+# Self-test pose for the leader arm (degrees; gripper in % open), sent as servo ticks.
+SELFTEST_LEADER_DEG = {"shoulder_pan": 30.0, "shoulder_lift": -40.0, "elbow_flex": 30.0,
+                       "wrist_flex": 20.0, "wrist_roll": 45.0, "gripper": 50.0}
+LEADER_TIMEOUT = 0.5  # s without leader data -> keys/gamepad control that arm again
+
+
+# Scripted Xbox input (W3C standard layout, as the browser sends it): (start, end, axes, buttons held).
+# axes = [LX, LY, RX, RY], stick up = -1. Button indices: A0 B1 X2 Y3 LB4 RB5 LT6 RT7 L3 10 R3 11 Up12.
+PAD_PHASES = (
+    (360, 400, [1.0, 0.0, 0.0, -1.0], {6}),   # left stick right: left EE forward; right stick up: right EE up; LT: close left gripper
+    (400, 440, [0.0, 0.0, 1.0, 0.0], {11, 1, 12}),  # R3 + right stick: right shoulder pan; B: head pan right; D-pad up: forward
+    (440, 480, [0.0, -1.0, 0.0, 0.0], {4}),   # LB + left stick up: left wrist pitch
+)
+LEADER_START, SELFTEST_END = 480, 570
+
+
+def selftest_gamepad(step):
+    for start, end, axes, held in PAD_PHASES:
+        if start <= step < end:
+            return {"id": "selftest Xbox", "mapping": "standard", "axes": axes,
+                    "buttons": [1.0 if i in held else 0.0 for i in range(17)]}
+    return None
+
+
+def selftest_leader_ticks(cal):
+    ticks = []
+    for joint in JOINTS:
+        value = SELFTEST_LEADER_DEG[joint]
+        if joint == "gripper":
+            c = cal[joint]
+            ticks.append(c["range_min"] + value / 100.0 * (c["range_max"] - c["range_min"]))
+        else:  # degrees from the calibration pose
+            ticks.append(HOMED_TICKS + value * TICKS_PER_TURN / 360.0)
+    return ticks
+
+
 def main():
     state = web.SharedState()
     state.real_action, state.real_action_time, state.real_action_source = {}, 0.0, None
@@ -166,7 +215,14 @@ def main():
     env_cfg = parse_env_cfg(args.task, device=args.device, num_envs=1)
     env_cfg.seed = args.seed
     env_cfg.terminations.time_out = None  # teleop runs until you stop it
+    # No recording here. The env's recorder keeps every step (camera images, the whole scene
+    # state) in memory until the episode ends, and a teleop episode never ends: memory grew
+    # ~2 GB/min until Slurm killed the job (OUT_OF_MEMORY) and the robot froze.
+    env_cfg.recorders = RecorderManagerBaseCfg()
     env_cfg.scene.chase = CHASE_CAMERA
+    if getattr(env_cfg, "chase_camera_offset", None):  # indoor scenes bring their own, closer one
+        pos, rot = env_cfg.chase_camera_offset
+        env_cfg.scene.chase = CHASE_CAMERA.replace(offset=TiledCameraCfg.OffsetCfg(pos=pos, rot=rot, convention="world"))
     env = gym.make(args.task, cfg=env_cfg).unwrapped
     obs, _ = env.reset()
     robot = env.scene["robot"]
@@ -176,6 +232,16 @@ def main():
         return obs["policy"]["state"][0].cpu().numpy()
 
     adapter = IsaacTeleopAdapter(current_state(), rest)
+    try:  # the leader arm is optional: without valid calibration files, keys and gamepad still work
+        leader_cal = load_calibration(os.path.join(REPO, args.leader_calibration))
+        # Each sim arm uses its own follower calibration, the same one that converts recorded data.
+        leader_to_sim = {side: LeaderToSim(leader_cal, ARM_CALIBRATION[side]) for side in ("left", "right")}
+        print(f"[teleop] leader arm calibration {args.leader_calibration}; followers from calibration.py")
+    except (OSError, ValueError, KeyError) as e:
+        if args.selftest:
+            raise
+        leader_to_sim = None
+        print(f"[teleop] leader arm input off: {e}")
     print(f"[teleop] env ready: {args.task}, action dim {env.action_manager.total_action_dim}", flush=True)
 
     enc = [int(cv2.IMWRITE_JPEG_QUALITY), args.jpeg_quality]
@@ -184,13 +250,17 @@ def main():
     prev_pad_buttons = []
     driven_externally = False  # True while /action is driving the robot
     start_pose = robot.data.joint_pos[0, :3].clone()
+    snap = {}
     try:
         while simulation_app.is_running():
             t0 = time.time()
             if args.selftest:
                 pressed, edges = selftest_input(step)
-                pad, do_reset = None, False
-                if step >= 360:
+                pad, do_reset = selftest_gamepad(step), False
+                leader = {"left": selftest_leader_ticks(leader_cal)} if step >= LEADER_START else {}
+                if step in (360, 400, 440, LEADER_START):  # state and base pose at each phase boundary
+                    snap[step] = (current_state(), robot.data.joint_pos[0, :3].cpu().numpy().copy())
+                if step >= SELFTEST_END:
                     break
             else:
                 with state.lock:
@@ -198,6 +268,7 @@ def main():
                     pressed = set(state.pressed) if alive else set()
                     pad = state.gamepad if alive else None
                     edges, state.edges = state.edges, set()
+                    leader = dict(state.leader) if t0 - state.last_leader < LEADER_TIMEOUT else {}
                     do_reset, state.reset_requested = state.reset_requested, False
             if do_reset:
                 obs, _ = env.reset()
@@ -228,6 +299,16 @@ def main():
                     adapter.reset(current_state())  # take over from where the external driver left the robot
                 driven_externally = False
                 action = adapter.step(cmd, pressed=pressed, edges=edges, gamepad=pad)
+            leader_arms = []
+            for name, ticks in (leader.items() if leader_to_sim else ()):  # a leader arm overrides its arm, whatever drives the rest
+                try:
+                    q = leader_to_sim[name]([float(t) for t in ticks][:6])
+                except (KeyError, TypeError, ValueError, IndexError):
+                    continue
+                side = 1 if name == "right" else 0  # action 0:6 = left arm, 6:12 = right arm
+                action[6 * side:6 * side + 6] = q
+                adapter.set_arm(side, q)
+                leader_arms.append(name)
             with torch.inference_mode():
                 obs, *_ = env.step(torch.as_tensor(action, device=env.device).unsqueeze(0))
             step += 1
@@ -249,12 +330,13 @@ def main():
                     "warmup": False,
                     "pressed": sorted(pressed),
                     "gamepad": pad_info,
+                    "leader": " + ".join(leader_arms) + " arm" if leader_arms else None,
                     "grippers_closed": adapter.gripper_closed,
                     "joints": np.round(current_state(), 3).tolist(),
                 }
                 state.frame_cond.notify_all()
 
-            if args.selftest and step in (1, 59, 119, 179, 239, 299, 359):
+            if args.selftest and step in (1, 59, 119, 179, 239, 299, 359, 399, 439, 479, 569):
                 out = os.path.join(os.environ["XLE_LOGS"], "teleop_selftest")
                 os.makedirs(out, exist_ok=True)
                 for name, image in frames.items():
@@ -272,8 +354,20 @@ def main():
             server.shutdown()
 
     if args.selftest:
-        s = current_state()
-        moved = (robot.data.joint_pos[0, :3] - start_pose).cpu().numpy()
+        s = snap[360][0]  # keyboard phase result
+        moved = snap[360][1] - start_pose.cpu().numpy()
+        p0, p1, p2, p3 = (snap[k][0] for k in (360, 400, 440, LEADER_START))
+        yaw = snap[400][1][2]
+        drove = snap[440][1][:2] - snap[400][1][:2]
+        drove_forward = drove[0] * np.cos(yaw) + drove[1] * np.sin(yaw)
+
+        def pitch(state, side):
+            return adapter.arms[side].pitch(dict(zip(JOINTS, state[6 * side:6 * side + 6])))
+
+        final = current_state()
+        want = leader_to_sim["left"](selftest_leader_ticks(leader_cal))
+        leader_err = np.degrees(np.abs(final[0:6] - want))
+        mapping_err = [abs(np.degrees(want[i]) - SELFTEST_LEADER_DEG[j]) for i, j in enumerate(JOINTS[:5])]
         checks = {
             "W drove forward (+x)": moved[0] > 0.1,
             "Q strafed left (+y)": moved[1] > 0.1,
@@ -282,7 +376,26 @@ def main():
             "left arm stayed put (no keys for it)": abs(s[1] - rest[1]) + abs(s[2] - rest[2]) < 0.02,
             "R panned head": s[12] > 0.3,
             "V closed right gripper": s[11] < 0.2,
+            "pad: right stick up moved right arm (lift/elbow)": abs(p1[7] - p0[7]) + abs(p1[8] - p0[8]) > 0.1,
+            "pad: left stick moved left arm (lift/elbow)": abs(p1[1] - p0[1]) + abs(p1[2] - p0[2]) > 0.1,
+            "pad: LT closed left gripper": p0[5] > 1.0 and p1[5] < 0.0,
+            "pad: R3 + right stick turned right shoulder": abs(p2[6] - p1[6]) > 0.1,
+            "pad: B panned head right": p2[12] < p1[12] - 0.1,
+            "pad: D-pad up drove forward": drove_forward > 0.1,
+            "pad: LB + left stick changed left wrist pitch": abs(pitch(p3, 0) - pitch(p2, 0)) > 0.1,
+            # only meaningful when the follower uses the leader's calibration (then angles copy 1:1)
+            "leader ticks -> joint angles (same calibration both sides)":
+                max(mapping_err) < 0.2 if leader_cal == ARM_CALIBRATION["left"] else True,
+            "leader drove left arm to its pose (< 3 deg)": leader_err.max() < 3.0,
+            "right arm stayed put while the leader drove the left": np.abs(final[6:12] - p3[6:12]).max() < 0.02,
         }
+        print(f"[teleop] gamepad: right arm lift/elbow {np.degrees(p1[7] - p0[7]):+.1f}/{np.degrees(p1[8] - p0[8]):+.1f} deg, "
+              f"left {np.degrees(p1[1] - p0[1]):+.1f}/{np.degrees(p1[2] - p0[2]):+.1f} deg, left gripper "
+              f"{np.degrees(p0[5]):.0f} -> {np.degrees(p1[5]):.0f} deg, right pan {np.degrees(p2[6] - p1[6]):+.1f} deg, "
+              f"head pan {np.degrees(p2[12] - p1[12]):+.1f} deg, forward {drove_forward:.2f} m, "
+              f"left pitch {np.degrees(pitch(p3, 0) - pitch(p2, 0)):+.1f} deg")
+        print("[teleop] leader pose (deg): want " + " ".join(f"{np.degrees(v):.1f}" for v in want)
+              + " | sim " + " ".join(f"{np.degrees(v):.1f}" for v in final[0:6]))
         print(f"[teleop] base moved x={moved[0]:.3f} m y={moved[1]:.3f} m yaw={np.degrees(moved[2]):.1f} deg; fps {fps:.1f}")
         for name, ok in checks.items():
             print(f"[teleop]   {'ok  ' if ok else 'FAIL'} {name}")

@@ -134,6 +134,16 @@ class IsaacTeleopAdapter:
             self.ee.append(self.arms[side].wrist(q))
             self.pitch.append(self.arms[side].pitch(q))
 
+    def set_arm(self, side, q):
+        """Set one arm's 6 joint targets from outside (the leader arm). Keys and gamepad
+        continue from this pose when the leader stops. side: 0 = left, 1 = right."""
+        o = 6 * side
+        self.target[o:o + 6] = q
+        arm_q = self._arm_q(side)
+        self.ee[side] = self.arms[side].wrist(arm_q)
+        self.pitch[side] = self.arms[side].pitch(arm_q)
+        self.gripper_closed[1 - side] = q[5] < (GRIPPER_OPEN + GRIPPER_CLOSED) / 2  # [right, left] order
+
     def _arm_q(self, side):
         o = 6 * side
         return dict(zip(JOINTS, self.target[o:o + 6]))

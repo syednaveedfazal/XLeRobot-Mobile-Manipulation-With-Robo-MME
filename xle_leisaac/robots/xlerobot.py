@@ -168,8 +168,8 @@ RIGHT_WRIST_CAMERA_CFG = _camera(
 
 # --- Conversions between sim joints and the real robot's 17 action values ---------------
 #
-# Arms: exact conversion from each arm's real calibration (calibration.py): the value 0 is
-# the middle of the calibrated range, +-100 its ends.
+# Arms: exact conversion from each arm's real calibration (calibration.py), through the servo
+# ticks: sim angle 0 is the calibration pose (ticks 2047), values +-100 the ends of the range.
 # Head: sim limits in degrees mapped to -100..100. head_motor_1 is assumed to be pan and
 # head_motor_2 tilt; NOT yet confirmed on the real robot.
 _HEAD_LIMITS_DEG = ((-90.0, 90.0), (-43.5, 83.0))

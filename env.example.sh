@@ -19,6 +19,7 @@ export XLE_LOGS=$XLE_WORK/logs
 export XLE_CACHE=$XLE_WORK/cache
 export XLE_SIF=$XLE_IMAGES/isaac-lab_2.3.0.sif
 export XLE_PYDEPS=$XLE_WORK/pydeps           # our pip packages (the image is read-only)
+export XLE_PYDEPS_PI=$XLE_WORK/pydeps_pi     # patched transformers for pi0.5; only on PYTHONPATH with XLE_WITH_PI=1
 export XLE_CONTAINER_HOME=$XLE_WORK/container_home # $HOME inside the container
 
 # Tool caches
