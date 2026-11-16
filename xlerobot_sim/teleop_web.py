@@ -28,6 +28,7 @@ import numpy as np
 import tyro
 
 from xlerobot_sim.teleop_controller import (
+    CONTROL_MODE,
     GAMEPAD_HELP,
     KEY_HELP,
     TeleopController,
@@ -210,7 +211,7 @@ def main(args: Args):
         args.env_id,
         robot_uids="xlerobot",
         obs_mode="rgb",
-        control_mode="pd_joint_delta_pos_dual_arm",
+        control_mode=CONTROL_MODE,
         render_mode="rgb_array",
         sensor_configs=dict(shader_pack=args.shader),
         human_render_camera_configs=dict(shader_pack=args.shader),
@@ -219,9 +220,10 @@ def main(args: Args):
         num_envs=1,
     )
     obs, _ = env.reset(seed=args.seed, options=dict(reconfigure=True))
-    robot = env.unwrapped.agent.robot
-    ctrl = TeleopController()
-    ctrl.reset(get_mapped_joints(robot))
+    agent = env.unwrapped.agent
+    bounds = env.unwrapped.single_action_space
+    ctrl = TeleopController(bounds.low, bounds.high)
+    ctrl.reset(get_mapped_joints(agent))
     print(f"[teleop] env ready: {args.env_id}, action dim {env.action_space.shape}", flush=True)
 
     dt_min = 1.0 / args.max_fps
@@ -239,8 +241,8 @@ def main(args: Args):
                 do_reset, state.reset_requested = state.reset_requested, False
             if do_reset:
                 obs, _ = env.reset(options=dict(reconfigure=False))
-                ctrl = TeleopController()
-                ctrl.reset(get_mapped_joints(robot))
+                ctrl = TeleopController(bounds.low, bounds.high)
+                ctrl.reset(get_mapped_joints(agent))
 
             cmd = keyboard_command(pressed, edges)
             pad_info = None
@@ -251,7 +253,7 @@ def main(args: Args):
             elif pad:
                 pad_info = f"unsupported layout ({pad.get('mapping') or 'non-standard'}): {pad.get('id')}"
 
-            current = get_mapped_joints(robot)
+            current = get_mapped_joints(agent)
             action = ctrl.step(cmd, current)
             obs, *_ = env.step(action)
 

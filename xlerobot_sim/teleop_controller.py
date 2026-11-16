@@ -2,15 +2,16 @@
 
 Input devices (keyboard, gamepad, later Joy-Con) are first turned into a device-independent
 `TeleopCommand` (rates in [-1, 1] per degree of freedom). `TeleopController` then turns
-commands into actions with the control law of upstream
+commands into joint targets with the arm control of upstream
 `third_party/xlerobot_maniskill/examples/demo_ctrl_action_ee_keyboard.py`
-(planar IK for Pitch/Elbow, P-control on joint targets).
+(planar IK for Pitch/Elbow) and sends them as absolute, rate-limited targets.
 
-Control mode: ``pd_joint_delta_pos_dual_arm`` (16-dim action):
-    [0] base forward velocity    [1] base rotation
-    [2:7]  arm 1 = RIGHT arm (Rotation, Pitch, Elbow, Wrist_Pitch, Wrist_Roll)
-    [7:12] arm 2 = LEFT arm  (same joints, suffix _2)
-    [12] gripper 1  [13] gripper 2  [14] head pan  [15] head tilt
+Control mode: ``pd_joint_pos_real_layout`` (17-dim action, the real robot's key order, see
+`xlerobot_sim.layout`):
+    [0:6]   LEFT arm  (arm 2: Rotation_2, Pitch_2, Elbow_2, Wrist_Pitch_2, Wrist_Roll_2, Jaw_2)
+    [6:12]  RIGHT arm (arm 1: Rotation, Pitch, Elbow, Wrist_Pitch, Wrist_Roll, Jaw)
+    [12:14] head pan, head tilt
+    [14:17] base x.vel, y.vel (m/s, robot frame), theta.vel (rad/s)
 """
 
 from __future__ import annotations
@@ -21,8 +22,12 @@ from typing import Iterable, Optional, Sequence
 
 import numpy as np
 
-ACTION_DIM = 16
-GRIPPER_OPEN, GRIPPER_CLOSED = 2.5, 0.1  # Jaw joint targets used upstream
+from xlerobot_sim import layout as L
+from xlerobot_sim.layout import ACTION_DIM, REAL_LAYOUT_MODE
+
+CONTROL_MODE = REAL_LAYOUT_MODE
+GRIPPER_OPEN, GRIPPER_CLOSED = 1.7, 0.0  # Jaw / Jaw_2 joint limits in the URDF: [0, 1.7] rad
+N_POS = L.BASE.start  # 14 position-controlled entries; the rest are base velocities
 
 
 # --------------------------------------------------------------------------- #
@@ -52,22 +57,12 @@ def inverse_kinematics(x: float, y: float, l1: float = 0.1159, l2: float = 0.135
     return joint2, joint3
 
 
-def get_mapped_joints(robot) -> np.ndarray:
-    """Map the robot's 17 qpos entries to the 16-dim action layout."""
-    if robot is None:
+def get_mapped_joints(agent) -> np.ndarray:
+    """Current robot state in the 17-dim action layout (env 0): joint positions, then base velocity."""
+    if agent is None:
         return np.zeros(ACTION_DIM)
-    q = robot.get_qpos()
-    if hasattr(q, "cpu"):
-        q = q.cpu()
-    q = np.asarray(q).squeeze()
-    m = np.zeros(ACTION_DIM)
-    if len(q) >= 17:
-        m[0], m[1] = q[0], q[2]
-        m[2:7] = q[[3, 6, 9, 11, 13]]
-        m[7:12] = q[[4, 7, 10, 12, 14]]
-        m[12], m[13] = q[15], q[16]
-        m[14], m[15] = q[5], q[8]
-    return m
+    s = agent.real_layout_state()[0]
+    return np.asarray(s.cpu() if hasattr(s, "cpu") else s, dtype=float)
 
 
 # --------------------------------------------------------------------------- #
@@ -87,7 +82,8 @@ class ArmCommand:
 @dataclass
 class TeleopCommand:
     base_forward: float = 0.0
-    base_turn: float = 0.0  # +left
+    base_turn: float = 0.0    # +left
+    base_strafe: float = 0.0  # +left (the real base is omnidirectional)
     head_pan: float = 0.0
     head_tilt: float = 0.0
     arm1: ArmCommand = field(default_factory=ArmCommand)  # right arm
@@ -98,16 +94,23 @@ class TeleopCommand:
         def arm(a: ArmCommand, b: ArmCommand) -> ArmCommand:
             return ArmCommand(a.ee_x + b.ee_x, a.ee_y + b.ee_y, a.rotation + b.rotation, a.pitch + b.pitch,
                               a.roll + b.roll, max(a.squeeze, b.squeeze), a.toggle_gripper or b.toggle_gripper)
-        return TeleopCommand(self.base_forward + o.base_forward, self.base_turn + o.base_turn,
-                             self.head_pan + o.head_pan, self.head_tilt + o.head_tilt,
-                             arm(self.arm1, o.arm1), arm(self.arm2, o.arm2), self.reset_arms or o.reset_arms)
+        return TeleopCommand(
+            base_forward=self.base_forward + o.base_forward,
+            base_turn=self.base_turn + o.base_turn,
+            base_strafe=self.base_strafe + o.base_strafe,
+            head_pan=self.head_pan + o.head_pan,
+            head_tilt=self.head_tilt + o.head_tilt,
+            arm1=arm(self.arm1, o.arm1),
+            arm2=arm(self.arm2, o.arm2),
+            reset_arms=self.reset_arms or o.reset_arms,
+        )
 
 
 # --------------------------------------------------------------------------- #
 # Controller (command -> action)
 # --------------------------------------------------------------------------- #
 class TeleopController:
-    """Integrates commands into joint targets and P-controls toward them."""
+    """Integrates commands into joint targets; sends them as absolute targets, rate-limited."""
 
     tip_length = 0.108
     # per-step increments at full deflection (same as upstream keyboard demo)
@@ -115,37 +118,45 @@ class TeleopController:
     rotation_step = 0.01
     pitch_step = 0.02
     roll_step = 0.03
-    turn_step = 0.02
     head_step = 0.02
+    # base speeds at full deflection: the real robot's "slow" preset (0.1 m/s, 30 deg/s)
     base_speed = 0.1
+    base_turn_speed = math.radians(30.0)
+    # largest change of a sent joint target per control step (the bound of upstream's delta controller)
+    max_target_step = 0.1
     warmup_steps = 50
     initial_ee = (0.162, 0.118)
+    arm_offsets = (L.RIGHT_ARM.start, L.LEFT_ARM.start)  # arm1 = right, arm2 = left
 
-    def __init__(self):
-        self.p_gain = np.ones(ACTION_DIM)
-        self.p_gain[0] = 2.0
-        self.p_gain[1] = 0.5
-        self.p_gain[12:14] = 0.05
-        self.p_gain[14:16] = 2.0
+    def __init__(self, action_low: Optional[Sequence[float]] = None,
+                 action_high: Optional[Sequence[float]] = None):
+        """action_low/high: the env's action bounds (joint limits); targets are kept inside them."""
+        self.low = np.full(ACTION_DIM, -np.inf) if action_low is None else np.asarray(action_low, float)
+        self.high = np.full(ACTION_DIM, np.inf) if action_high is None else np.asarray(action_high, float)
         self.step_counter = 0
         self.gripper_closed = [False, False]  # toggle state per arm; grippers start open
+        self.sent: Optional[np.ndarray] = None
         self.reset()
 
     def reset(self, current_joints: Optional[np.ndarray] = None):
-        """Reset arm targets to the upstream initial pose. Keeps base heading and head."""
+        """Reset arm targets to the upstream initial pose. Keeps the head where it is."""
         self.ee = [np.array(self.initial_ee, dtype=float), np.array(self.initial_ee, dtype=float)]
         self.pitch = [0.0, 0.0]
         t = np.zeros(ACTION_DIM)
         if current_joints is not None:
-            t[1] = current_joints[1]
-            t[14:16] = current_joints[14:16]
-        t[6] = t[11] = 1.57
+            t[L.HEAD] = current_joints[L.HEAD]
+        for o in self.arm_offsets:
+            t[o + 4] = 1.57              # wrist roll
+            t[o + 5] = GRIPPER_OPEN      # gripper
         self.target = t
         self._apply_arm_ik(0)
         self._apply_arm_ik(1)
+        # targets are sent from where the robot is, so a reset never makes the arms jump
+        self.sent = (np.array(current_joints[:N_POS], dtype=float) if current_joints is not None
+                     else self.target[:N_POS].copy())
 
     def _apply_arm_ik(self, i: int):
-        o = 2 + 5 * i  # first joint index of this arm
+        o = self.arm_offsets[i]  # first joint index of this arm
         x, y = self.ee[i]
         self.target[o + 1], self.target[o + 2] = inverse_kinematics(x, y + self.tip_length * math.sin(self.pitch[i]))
         self.target[o + 3] = self.target[o + 1] - self.target[o + 2] + self.pitch[i]
@@ -158,18 +169,20 @@ class TeleopController:
         action = np.zeros(ACTION_DIM)
         self.step_counter += 1
         if self.step_counter <= self.warmup_steps:
+            action[:N_POS] = self.sent  # hold still while the robot settles
             return action
         if cmd.reset_arms:
             self.reset(current_joints)
         t = self.target
 
-        action[0] = float(np.clip(cmd.base_forward, -1, 1)) * self.base_speed
-        t[1] += float(np.clip(cmd.base_turn, -1, 1)) * self.turn_step
-        t[14] += float(np.clip(cmd.head_pan, -1, 1)) * self.head_step
-        t[15] += float(np.clip(cmd.head_tilt, -1, 1)) * self.head_step
+        action[L.BASE_X] = float(np.clip(cmd.base_forward, -1, 1)) * self.base_speed
+        action[L.BASE_Y] = float(np.clip(cmd.base_strafe, -1, 1)) * self.base_speed
+        action[L.BASE_YAW] = float(np.clip(cmd.base_turn, -1, 1)) * self.base_turn_speed
+        t[L.HEAD_PAN] += float(np.clip(cmd.head_pan, -1, 1)) * self.head_step
+        t[L.HEAD_TILT] += float(np.clip(cmd.head_tilt, -1, 1)) * self.head_step
 
         for i, a in enumerate((cmd.arm1, cmd.arm2)):
-            o = 2 + 5 * i
+            o = self.arm_offsets[i]
             self.ee[i][0] += float(np.clip(a.ee_x, -1, 1)) * self.ee_step
             self.ee[i][1] += float(np.clip(a.ee_y, -1, 1)) * self.ee_step
             self.pitch[i] += float(np.clip(a.pitch, -1, 1)) * self.pitch_step
@@ -180,17 +193,20 @@ class TeleopController:
             if a.toggle_gripper:
                 self.gripper_closed[i] = not self.gripper_closed[i]
             closed = max(1.0 if self.gripper_closed[i] else 0.0, float(np.clip(a.squeeze, 0, 1)))
-            t[12 + i] = GRIPPER_OPEN + closed * (GRIPPER_CLOSED - GRIPPER_OPEN)
+            t[o + 5] = GRIPPER_OPEN + closed * (GRIPPER_CLOSED - GRIPPER_OPEN)
 
-        action[1:] = self.p_gain[1:] * (t[1:] - current_joints[1:])
-        return action
+        # keep targets inside the joint limits (no wind-up past a limit), then rate-limit what is sent
+        t[:N_POS] = np.clip(t[:N_POS], self.low[:N_POS], self.high[:N_POS])
+        self.sent = self.sent + np.clip(t[:N_POS] - self.sent, -self.max_target_step, self.max_target_step)
+        action[:N_POS] = self.sent
+        return np.clip(action, self.low, self.high)
 
 
 # --------------------------------------------------------------------------- #
 # Keyboard (keys are browser KeyboardEvent.key values, lowercased)
 # --------------------------------------------------------------------------- #
 KEY_HELP = [
-    ("Base", [("W / S", "forward / back"), ("A / D", "turn left / right")]),
+    ("Base", [("W / S", "forward / back"), ("A / D", "turn left / right"), ("Q / E", "slide left / right")]),
     ("Arm 1 (right)", [("8 / U", "EE up / down"), ("9 / I", "EE forward / back"),
                        ("7 / Y", "shoulder rotation +/-"), ("0 / O", "wrist pitch +/-"),
                        ("- / P", "wrist roll +/-"), ("V", "toggle gripper")]),
@@ -212,6 +228,7 @@ def keyboard_command(pressed: Iterable[str], newly_pressed: Iterable[str]) -> Te
     return TeleopCommand(
         base_forward=ax("w", "s"),
         base_turn=ax("a", "d"),
+        base_strafe=ax("q", "e"),
         head_pan=ax("r", "t"),
         head_tilt=ax("f", "g"),
         arm1=ArmCommand(ee_x=ax("9", "i"), ee_y=ax("8", "u"), rotation=ax("7", "y"),
@@ -226,7 +243,8 @@ def keyboard_command(pressed: Iterable[str], newly_pressed: Iterable[str]) -> Te
 # Gamepad: W3C "standard" mapping (Xbox, PlayStation, Switch Pro, ... in the browser)
 # --------------------------------------------------------------------------- #
 GAMEPAD_HELP = [
-    ("Base", [("D-pad up / down", "forward / back"), ("D-pad left / right", "turn")]),
+    ("Base", [("D-pad up / down", "forward / back"), ("D-pad left / right", "turn"),
+              ("View (⧉) + D-pad left / right", "slide left / right")]),
     ("Arm 1 (right)", [("Right stick", "EE up-down / forward-back"), ("RB + right stick", "wrist pitch / roll"),
                        ("R3 (click) + right stick", "shoulder rotation"), ("RT", "close gripper (analog)")]),
     ("Arm 2 (left)", [("Left stick", "EE up-down / forward-back"), ("LB + left stick", "wrist pitch / roll"),
@@ -271,9 +289,11 @@ def gamepad_command(axes: Sequence[float], buttons: Sequence[float], prev_button
             c.ee_x, c.ee_y = sx, sy
         return c
 
+    lateral = float(held(LEFT)) - float(held(RIGHT))
     return TeleopCommand(
         base_forward=float(held(UP)) - float(held(DOWN)),
-        base_turn=float(held(LEFT)) - float(held(RIGHT)),
+        base_turn=0.0 if held(VIEW) else lateral,
+        base_strafe=lateral if held(VIEW) else 0.0,
         head_pan=float(held(X)) - float(held(B)),
         head_tilt=float(held(Y)) - float(held(A)),
         arm1=arm(RX, RY, RB, R3, RT),
