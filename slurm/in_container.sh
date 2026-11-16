@@ -6,6 +6,7 @@
 #
 #   slurm/in_container.sh /isaac-sim/python.sh --version
 #   slurm/in_container.sh bash          # a shell inside the container
+#   XLE_WITH_PI=1 slurm/in_container.sh ...   # pi0.5 jobs: put the patched transformers first
 #
 # The .sif image is read-only, so anything Isaac Sim writes must be pointed at
 # the workspace with a bind (-B host_path:container_path).
@@ -13,6 +14,13 @@
 set -euo pipefail
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 source "$REPO/env.local.sh"
+
+# LeRobot's pi0.5 needs transformers@fix/lerobot_openpi (installed in $XLE_PYDEPS_PI,
+# see setup/05_pi_deps.sh). It is opt-in so Isaac Sim keeps the image's transformers.
+PI_ENV=()
+if [ "${XLE_WITH_PI:-0}" = "1" ]; then
+    PI_ENV=(--env PYTHONPATH="$XLE_PYDEPS_PI")
+fi
 
 # --nv            bring in the host's NVIDIA driver libraries
 # --containall    hide the host's home, /tmp and environment for a clean run
@@ -34,5 +42,6 @@ exec apptainer exec --nv --containall --writable-tmpfs \
     --env PIP_CACHE_DIR="$PIP_CACHE_DIR",HF_HOME="$HF_HOME",TORCH_HOME="$TORCH_HOME",HF_LEROBOT_HOME="$HF_LEROBOT_HOME" \
     --env LEISAAC_ASSETS_ROOT="$LEISAAC_ASSETS_ROOT",XLE_WORK="$XLE_WORK",XLE_LOGS="$XLE_LOGS" \
     --env XLE_THIRD_PARTY="$XLE_THIRD_PARTY",XLE_DATA="$XLE_DATA",XLE_ASSETS="$XLE_ASSETS" \
+    "${PI_ENV[@]}" \
     --pwd "$REPO" \
     "$XLE_SIF" "$@"

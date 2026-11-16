@@ -80,3 +80,15 @@ def xlerobot_state(env, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> 
     left = -torch.sin(yaw) * x_vel + torch.cos(yaw) * y_vel
     return torch.cat([positions, torch.stack([forward, left, turn], dim=-1)], dim=-1)
 
+
+
+def reset_collections_to_default(env, env_ids: torch.Tensor):
+    """Put every object of every rigid object collection back at its start pose, at rest.
+
+    Isaac Lab's reset_scene_to_default handles single rigid objects and articulations, but not
+    collections (which the scene envs use for their ~100 movable objects).
+    """
+    for collection in env.scene.rigid_object_collections.values():
+        state = collection.data.default_object_state[env_ids].clone()
+        state[..., 0:3] += env.scene.env_origins[env_ids].unsqueeze(1)
+        collection.write_object_state_to_sim(state, env_ids=env_ids)

@@ -10,7 +10,7 @@ This repo runs XLeRobot in **two simulators** on the Marvin cluster, so the two 
 | Simulator | Isaac Sim 5.1 + Isaac Lab 2.3 + LeIsaac (Apptainer container) | ManiSkill 3 + SAPIEN (conda env) |
 | Robot model | XLeRobot body + official SO-101 arms (`tools/build_xlerobot_urdf.py`) | XLeRobot's ManiSkill model (SO-100 arms), vendored |
 | Action | 17-D, same keys and units as the real robot | 16-D joint deltas (`pd_joint_delta_pos_dual_arm`) |
-| Scene | `XLeRobot-Sandbox-v0`: table, objects, bins, cups, occluders | `XLeRobot-ReplicaCAD-v1`: ReplicaCAD apartment |
+| Scene | `XLeRobot-Sandbox-v0`: table, objects, bins, cups, occluders<br>`XLeRobot-ReplicaCAD-v0`: the same ReplicaCAD apartment as Part B (section 3E) | `XLeRobot-ReplicaCAD-v1`: ReplicaCAD apartment |
 | Data | LeIsaac HDF5 → LeRobot v3 dataset | – |
 | Browser teleop | uses Part B's teleop page and input mappings | `xlerobot_sim/teleop_web.py` |
 | Workspace | `ws_allocate xle_sim 90` | `ws_allocate xlerobot 90` |
@@ -70,6 +70,10 @@ sbatch --output=$HOME/xle_deps_%j.out setup/03_python_deps.sbatch
 # 6. Build the XLeRobot robot (XLeRobot body + official SO-101 arms) and sandbox props.
 #    Submits a GPU job at the end for the parts that need Isaac Sim.
 bash setup/04_xlerobot_asset.sh
+
+# 7. The ReplicaCAD apartment for XLeRobot-ReplicaCAD-v0 (needs Part B's setup/install.sh first:
+#    it uses that conda env and the ReplicaCAD download). Login node ~30 s, then a short GPU job.
+bash setup/06_replicacad.sh
 ```
 
 Check a job with `squeue -u $USER`, and read its log with `cat ~/xle_<name>_<jobid>.out`.
@@ -163,6 +167,92 @@ sbatch --output=$HOME/xle_tsel_%j.out slurm/sim_job.sbatch \
     /isaac-sim/python.sh -m xle_leisaac.teleop.isaac_teleop_web --selftest
 ```
 
+The self-test also sends a scripted leader-arm pose (section 3D) and checks the sim arm reaches it.
+
+### D. SO-101 leader arm drives a sim arm
+
+Your real SO-101 leader arm, plugged into your laptop, moves one XLeRobot arm in the Isaac sandbox.
+Keyboard and gamepad keep driving the base, the head and the other arm.
+
+1. Start the teleop as in 3C and copy the URL it prints.
+2. On the laptop (needs Python 3 and `pip install pyserial`; a LeRobot env has it), with the leader plugged in:
+
+   ```bash
+   python leader_client.py "http://localhost:22874/?token=..." --port /dev/ttyACM0   # right arm
+   python leader_client.py "http://localhost:22874/?token=..." --port /dev/ttyACM0 --arm left
+   ```
+
+   `leader_client.py` is [`scripts/leader_client.py`](scripts/leader_client.py); copy that one file to the
+   laptop. Port names: Linux `/dev/ttyACM0`, macOS `/dev/tty.usbmodem...`, Windows `COM3`
+   (`lerobot-find-port` finds it). `--fake` sends a slow wave instead, to test without the arm.
+3. The page's status line shows `leader arm: right arm`. The script prints each joint's angle from
+   the calibration pose: hold the arm in that pose and every joint should read about 0.
+
+If the script stops or loses the arm for 0.5 s, keys and gamepad take that arm over again from where it is.
+
+**Calibration.** Same chain as LeRobot teleoperation, with the follower simulated:
+leader ticks → normalised value with the leader calibration `calibration/my_leader.json` →
+follower ticks with the follower calibration `calibration/my_follower.json` → sim joint angle.
+`my_follower.json` is a copy of `my_leader.json`, so each sim joint copies the leader joint's angle
+one to one (angle = (ticks − 2047) · 360/4096, the calibration pose being 0, as in the official
+SO-101 `new_calib` model). The gripper is the exception: the leader's trigger range is spread over the
+sim gripper's range (closed −10° to open 100°). Set `drive_mode` to 1 for a joint in `my_follower.json`
+to flip its direction; use other files with `--leader_calibration` / `--follower_calibration`.
+
+Check a calibration without a GPU (prints the sim angle at each end of every joint's range):
+
+```bash
+source env.local.sh && python3 tools/check_leader_mapping.py
+```
+
+### E. The apartment: XLeRobot-ReplicaCAD-v0
+
+The ReplicaCAD apartment (the one Part B uses) converted to Isaac Sim: kitchen, living room,
+about 100 movable objects, and furniture whose drawers and doors open (kitchen counter, fridge,
+wall cupboard, chest of drawers, cabinet). Robot, cameras, the 17-D action, observations and
+recording are the same as in the sandbox, so every command above takes `--task XLeRobot-ReplicaCAD-v0`:
+
+```bash
+bash scripts/start_teleop_isaac.sh --task XLeRobot-ReplicaCAD-v0 --device cpu
+```
+
+**Use `--device cpu`** with one environment. It runs the physics on the CPU (rendering stays on
+the GPU). With ~100 resting objects that is 20x faster than GPU physics: about 21 env steps/s
+in the apartment instead of 12, the same as the sandbox. GPU physics only pays off with many
+parallel environments.
+
+Check it (prints PASS/FAIL per line; pictures of every room in `logs/scene_check/`):
+
+```bash
+sbatch --output=$HOME/xle_scene_%j.out slurm/sim_job.sbatch \
+    /isaac-sim/python.sh tools/check_scene.py --enable_cameras --device cpu
+```
+
+**How a scene is built.** `tools/build_replicacad_usd.py` (plain Python, login node) writes three
+layers to `$XLE_ASSETS/replicacad/`, and `scenes/apt_0/manifest.json` lists what goes where:
+
+| Layer | What | In Isaac Lab |
+| --- | --- | --- |
+| shell | walls, floor, fixed furniture, ceiling lights | one static USD |
+| objects | bowls, books, cushions, ... | one rigid object collection, reset every episode |
+| furniture | articulations with drawers and doors | fixed base; joints damped, so a drawer stays where it is left |
+
+The manifest also holds the robot's start pose and named **anchors** for tasks: counter tops,
+the inside of each drawer and cupboard shelf (`counter_left`, `drawer_left_top`, ...), each in the
+frame of its furniture link. `tools/settle_scene.py` (run by the setup script) lets the objects
+come to rest once in Isaac Sim and stores those poses, so episodes do not start with things
+sliding into place.
+
+**Another scene (e.g. a scan of the lab)** is another manifest: a shell USD, objects, furniture
+and a robot start pose. Point a subclass of `XLeRobotSceneEnvCfg` (`xle_leisaac/tasks/scene_env_cfg.py`)
+at it with `scene_manifest`, register a new id, and nothing else changes.
+
+ReplicaCAD details the converter deals with (in case a scene looks wrong): Habitat's Y-up frames
+are turned Z-up; per-instance furniture scale is baked into the furniture files (so drawer travel
+is scaled too); each articulation's root link is made its asset origin (Isaac Lab places the root
+link at the spawn pose on every reset); slightly tilted furniture is made upright; objects that
+start sunk into a surface are lifted; room doors are left out, as in ManiSkill.
+
 ## 4. What you can run
 
 All results land in `$XLE_LOGS` = `/lustre/scratch/data/<user>-xle_sim/logs/`.
@@ -178,6 +268,8 @@ All results land in `$XLE_LOGS` = `/lustre/scratch/data/<user>-xle_sim/logs/`.
 | `tools/convert_to_lerobot.py --overwrite` | HDF5 to LeRobot v3 dataset | `data/lerobot/local/xle_sandbox_v0/` |
 | `tools/check_dataset.py` | Loads the dataset with lerobot, prints features and ranges, one MP4 per episode | `logs/dataset_check/` |
 | `tools/replay_episode.py --enable_cameras --episode 0` | Replays a recorded episode and checks the sim repeats it | log only |
+| `tools/check_scene.py --enable_cameras --device cpu` | Apartment: objects settle, furniture stays shut and holds open, robot drives; pictures of every room | `logs/scene_check/` |
+| `tools/settle_scene.py --enable_cameras --device cpu` | Lets the apartment's objects come to rest and stores those start poses (setup does this) | manifest |
 
 Example, the whole data pipeline in one job:
 
@@ -219,6 +311,8 @@ grep -E '\[xsmoke\]|\[record\]|\[check\]|Error' ~/xle_sim_<jobid>.out
 | Robot gains, limits, cameras, rest pose | `xle_leisaac/robots/xlerobot.py` |
 | Robot geometry or mass (rebuild afterwards) | `tools/build_xlerobot_urdf.py`, then `bash setup/04_xlerobot_asset.sh` |
 | Scene, objects, observations, resets, episode length | `xle_leisaac/tasks/sandbox_env_cfg.py` |
+| Apartment: furniture damping, lighting, render quality | `xle_leisaac/tasks/scene_env_cfg.py` |
+| Apartment: conversion (robot start, ceiling lights, materials), then `bash setup/06_replicacad.sh` | `tools/build_replicacad_usd.py` |
 | Scripted motion for recording | `make_routine()` in `tools/record_scripted.py` |
 | A new task | copy `sandbox_env_cfg.py`, add a success term, register a new id in `xle_leisaac/__init__.py` |
 
@@ -241,6 +335,41 @@ The 17 actions have the same names and units as the real robot:
 
 Motor limits are the real STS3215. The total mass is 12 kg. Pinned versions are in
 `versions.lock.md`.
+
+## 8. Training π0.5 with or without memory
+
+`xle_policies/pi05_mem` is LeRobot's π0.5 with one switch, `--policy.memory`:
+
+| `memory=` | What the policy sees |
+| --- | --- |
+| `none` | the current frame only: LeRobot's π0.5 unchanged |
+| `framesamp_modul` | RoboMME's best variant, **FrameSamp + Modul**: 32 past head-camera frames, sampled evenly over the episode so far. Each one is pooled to 16 SigLIP tokens. In every action-expert layer, cross-attention to them gives an AdaLN scale and shift before the feed-forward. It adds ~88M parameters; the VLM is untouched. |
+
+Both use the same training settings, and the vision encoder is frozen for both, as in
+RoboMME. Other designs go into `MEMORY_TYPES` in `configuration.py` and a builder in
+`memory.py`. The port follows RoboMME's code (`RoboMME/robomme_policy_learning@ac846a9`).
+`tools/test_pi05_mem.py` checks it against that code and checks that the training and
+inference paths match.
+
+```bash
+bash setup/05_pi_deps.sh          # once: the patched transformers LeRobot's π0.5 needs
+# once per dataset, memory runs only: SigLIP features of every head-camera frame (~64 KB/frame)
+XLE_WITH_PI=1 sbatch --output=$HOME/xle_cache_%j.out slurm/sim_job.sbatch \
+    /isaac-sim/python.sh tools/build_memory_cache.py --repo_id local/xle_sandbox_v0
+sbatch slurm/train_pi05_mem.sbatch none               # baseline
+sbatch slurm/train_pi05_mem.sbatch framesamp_modul    # memory
+```
+
+- **Hugging Face access.** π0.5's tokenizer (`google/paligemma-3b-pt-224`) is gated. Accept
+  its licence on Hugging Face, then log in inside the container (`HF_HOME` is set there).
+- **Same weights for cache and training.** Cached and online memory features must come
+  from the same vision weights. Build the cache from the checkpoint you fine-tune from.
+- **Inference.** Call `select_action` at every control step, at the dataset's fps. It
+  encodes each frame into the memory buffer, and `reset()` clears the buffer between
+  episodes.
+- **Lustre.** The root of the `xle_sim` workspace refuses new files (ENOSPC: their first
+  256 KB go to a full metadata server). Subfolders work; `05_pi_deps.sh` sets an
+  OST-only layout for its folder.
 
 ---
 

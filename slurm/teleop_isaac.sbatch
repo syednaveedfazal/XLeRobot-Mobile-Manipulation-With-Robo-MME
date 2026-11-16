@@ -3,7 +3,7 @@
 #SBATCH --partition=mlgpu_devel
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=64G
+#SBATCH --mem=24G   # Isaac jobs peak at 8-15 GB RAM; asking for less starts sooner (A40 nodes are short of RAM, not GPUs)
 #SBATCH --time=01:00:00
 #SBATCH --output=logs/teleop-%j.out
 # Browser teleop of XLeRobot in Isaac Lab (the twin of scripts/teleop.sbatch for ManiSkill).

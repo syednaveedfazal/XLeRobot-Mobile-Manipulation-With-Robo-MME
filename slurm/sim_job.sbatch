@@ -10,7 +10,7 @@
 #SBATCH --partition=mlgpu_devel
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=64G
+#SBATCH --mem=24G   # Isaac jobs peak at 8-15 GB RAM; asking for less starts sooner (A40 nodes are short of RAM, not GPUs)
 #SBATCH --time=00:50:00
 
 cd "$SLURM_SUBMIT_DIR"

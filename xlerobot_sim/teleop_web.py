@@ -82,6 +82,8 @@ class SharedState:
         self.edges: set[str] = set()
         self.gamepad: Optional[dict] = None  # {"id", "mapping", "axes", "buttons"}
         self.last_input = 0.0
+        self.leader: dict = {}  # SO-101 leader arms: {"right"|"left": [6 servo ticks]} (Isaac teleop)
+        self.last_leader = 0.0
         self.reset_requested = False
         self.status: dict = {}
         self.running = True
@@ -158,6 +160,9 @@ def make_handler(state: SharedState, token: str, page: str):
                     state.edges |= {str(k).lower() for k in data.get("down", [])}
                     state.gamepad = data.get("gamepad")
                     state.last_input = time.time()
+                elif path == "/leader":  # scripts/leader_client.py, ~50 Hz
+                    state.leader = {k: v for k, v in data.items() if k in ("right", "left")}
+                    state.last_leader = time.time()
                 elif path == "/reset":
                     state.reset_requested = True
             self._send(200, b"{}", "application/json")
@@ -400,7 +405,8 @@ setInterval(async () => {
     document.getElementById("status").textContent =
       "keys: " + (s.pressed.join(" ") || "-") +
       "\ngrippers closed (R, L): " + s.grippers_closed.join(", ") +
-      "\njoints: " + s.joints.map(x=>x.toFixed(2)).join(" ");
+      "\njoints: " + s.joints.map(x=>x.toFixed(2)).join(" ") +
+      (s.leader ? "\nleader arm: " + s.leader : "");
   } catch (e) {}
 }, 500);
 </script></body></html>
