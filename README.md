@@ -195,11 +195,15 @@ leader ticks → normalised value with the leader calibration `calibration/my_le
 real follower would be sent) → sim joint angle with the follower calibration in
 `xle_leisaac/robots/calibration.py` (`ARM_CALIBRATION_FILES`, `calibration/my_follower.json` for both
 arms for now). That last step is the same conversion recorded data and the Joy-Con input (section 3F)
-use, so all three agree: the middle of each joint's calibrated range is sim angle 0, its ends are the
-sim joint limits. The gripper's 0..100 is spread over the sim gripper's range (closed −10° to open
-100°). A different leader file: `--leader_calibration`.
+use, so all three agree. A value is turned back into the follower's servo ticks, and the
+**calibration pose** (the pose held when LeRobot asks for "the middle of its range", which reads
+2047 ticks) is sim angle 0, as in the official SO-101 `new_calib` model: angle = (ticks − 2047) · 360/4096.
+The ends of each calibrated range are the sim joint limits, so these are usually not symmetric.
+Note that LeRobot's value 0 is the middle of `range_min..range_max`, which is *not* the calibration
+pose (on `my_follower.json` shoulder lift and elbow differ by about 20°). The gripper's 0..100 is
+spread over the sim gripper's range (closed −10° to open 100°). A different leader file: `--leader_calibration`.
 
-Check a calibration without a GPU (prints the sim angle at the ends and middle of every joint's range):
+Check a calibration without a GPU (prints the sim angle at each end of every joint's range and at the calibration pose):
 
 ```bash
 source env.local.sh && python3 tools/check_leader_mapping.py

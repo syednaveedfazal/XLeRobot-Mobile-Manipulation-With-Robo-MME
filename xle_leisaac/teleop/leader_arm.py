@@ -11,8 +11,11 @@ This is the same chain as real LeRobot teleoperation, with the follower simulate
 - Value -> sim angle is calibration.real_to_sim, the same conversion that turns recorded
   sim data into real-robot units (sim_to_lerobot_action) and that the Joy-Con /action
   input uses. So a leader pose, a Joy-Con command and a dataset value of the same number
-  all put the sim arm in the same place. Arm joints: 0 = middle of the follower's
-  calibrated range (LeRobot's degree mode). Gripper: 0..100 = closed..open.
+  all put the sim arm in the same place. Arm joints: the value is turned back into the
+  follower's servo ticks, and sim angle 0 is the calibration pose (ticks 2047), as in the
+  official SO-101 new_calib model. Gripper: 0..100 = closed..open.
+  With the follower calibration equal to the leader's, the sim arm copies the leader's
+  angles one to one.
 
 Plain Python + numpy: no Isaac Sim needed, so tools/check_leader_mapping.py can test it.
 """
@@ -32,7 +35,8 @@ calibration = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(calibration)
 
 JOINTS = ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper")
-TICKS_PER_TURN = calibration.TICKS_PER_TURN  # 4095, as in LeRobot's degree mode
+TICKS_PER_TURN = calibration.TICKS_PER_TURN  # 4096
+HOMED_TICKS = calibration.HOMED_TICKS  # 2047: what the calibration pose reads
 
 
 def load_calibration(path):
@@ -45,11 +49,6 @@ def load_calibration(path):
         if cal[j]["range_max"] <= cal[j]["range_min"]:
             raise ValueError(f"{path}: {j} has range_max <= range_min")
     return cal
-
-
-def range_mid(motor):
-    """Middle of a motor's calibrated range in ticks: 0 in LeRobot's normalised and degree units."""
-    return (motor["range_min"] + motor["range_max"]) / 2
 
 
 def normalize(joint, ticks, cal):

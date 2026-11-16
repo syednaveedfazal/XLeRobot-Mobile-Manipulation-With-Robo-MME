@@ -68,6 +68,7 @@ import gymnasium as gym  # noqa: E402
 import isaaclab.sim as sim_utils  # noqa: E402
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
+from isaaclab.managers import RecorderManagerBaseCfg  # noqa: E402
 from isaaclab.sensors import TiledCameraCfg  # noqa: E402
 from isaaclab_tasks.utils import parse_env_cfg  # noqa: E402
 
@@ -80,7 +81,7 @@ from xle_leisaac.robots.xlerobot import (  # noqa: E402
     sim_to_lerobot_action,
 )
 from xle_leisaac.teleop.command_to_action import JOINTS, REPO, IsaacTeleopAdapter  # noqa: E402  (also loads xlerobot_sim)
-from xle_leisaac.teleop.leader_arm import TICKS_PER_TURN, LeaderToSim, load_calibration, range_mid  # noqa: E402
+from xle_leisaac.teleop.leader_arm import HOMED_TICKS, TICKS_PER_TURN, LeaderToSim, load_calibration  # noqa: E402
 from xlerobot_sim import teleop_web as web  # noqa: E402
 from xlerobot_sim.teleop_controller import GAMEPAD_HELP, KEY_HELP, gamepad_command, keyboard_command  # noqa: E402
 
@@ -200,8 +201,8 @@ def selftest_leader_ticks(cal):
         if joint == "gripper":
             c = cal[joint]
             ticks.append(c["range_min"] + value / 100.0 * (c["range_max"] - c["range_min"]))
-        else:  # degrees from the middle of the calibrated range (LeRobot's degree mode)
-            ticks.append(range_mid(cal[joint]) + value * TICKS_PER_TURN / 360.0)
+        else:  # degrees from the calibration pose
+            ticks.append(HOMED_TICKS + value * TICKS_PER_TURN / 360.0)
     return ticks
 
 
@@ -214,6 +215,10 @@ def main():
     env_cfg = parse_env_cfg(args.task, device=args.device, num_envs=1)
     env_cfg.seed = args.seed
     env_cfg.terminations.time_out = None  # teleop runs until you stop it
+    # No recording here. The env's recorder keeps every step (camera images, the whole scene
+    # state) in memory until the episode ends, and a teleop episode never ends: memory grew
+    # ~2 GB/min until Slurm killed the job (OUT_OF_MEMORY) and the robot froze.
+    env_cfg.recorders = RecorderManagerBaseCfg()
     env_cfg.scene.chase = CHASE_CAMERA
     if getattr(env_cfg, "chase_camera_offset", None):  # indoor scenes bring their own, closer one
         pos, rot = env_cfg.chase_camera_offset
