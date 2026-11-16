@@ -15,6 +15,10 @@ Mass: the source base_link weighs 74.9 kg, but the XLeRobot hardware docs give ~
 the whole robot. The base gets whatever is left of 12 kg after the arms (official SO-101
 masses) and the head (estimated as SO-101-like links plus a camera).
 
+Joint limits: each arm's joints get the real arm's reachable range from its LeRobot
+calibration file (xle_leisaac/robots/calibration.py, ARM_CALIBRATION_FILES), instead of the
+generic limits in the official URDF.
+
 Joint names become left_arm_shoulder_pan ... right_arm_gripper, which matches the real
 robot's action keys. Plain Python, no Isaac Sim needed:
 
@@ -22,6 +26,8 @@ robot's action keys. Plain Python, no Isaac Sim needed:
 """
 
 import copy
+import importlib.util
+import math
 import os
 import sys
 import xml.etree.ElementTree as ET
@@ -30,6 +36,14 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from urdf_geometry import Urdf  # noqa: E402
+
+# Load the calibration helpers by file path: importing the xle_leisaac package would need
+# gymnasium, which the login node's plain Python does not have.
+_spec = importlib.util.spec_from_file_location(
+    "calibration", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "xle_leisaac/robots/calibration.py")
+)
+calibration = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(calibration)
 
 ASSETS = os.environ["XLE_ASSETS"]
 XLE_URDF = os.path.join(ASSETS, "robots/xlerobot/xlerobot/xlerobot.urdf")
@@ -114,6 +128,20 @@ def main():
                 robot.append(element)
             elif element.tag == "material" and robot.find(f"material[@name='{element.get('name')}']") is None:
                 robot.insert(0, element)
+
+        # Real reachable range of this arm, from its calibration file.
+        side = prefix.split("_")[0]
+        cal_path = calibration.ARM_CALIBRATION_FILES[side]
+        cal = calibration.load(cal_path)
+        problems = calibration.check(cal, os.path.basename(cal_path))
+        if problems:
+            raise SystemExit("bad calibration: " + "; ".join(problems))
+        for joint, (lo, hi) in calibration.joint_limits_deg(cal).items():
+            limit = robot.find(f"joint[@name='{prefix}{joint}']/limit")
+            limit.set("lower", f"{math.radians(lo):.6f}")
+            limit.set("upper", f"{math.radians(hi):.6f}")
+        print(f"[urdf] {prefix[:-1]} limits from {os.path.relpath(cal_path)}:")
+        print("\n".join("[urdf]   " + line for line in calibration.describe(cal).splitlines()))
 
         mount = ET.SubElement(robot, "joint", name=f"{prefix}mount", type="fixed")
         ET.SubElement(mount, "origin", xyz=" ".join(f"{v:.5f}" for v in offset), rpy="0 0 0")

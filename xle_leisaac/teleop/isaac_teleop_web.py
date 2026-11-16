@@ -9,6 +9,13 @@ unchanged; only the simulator loop is different:
                          -> XLeRobot-Sandbox-v0 in Isaac Lab
                          -> camera frames -> JPEG -> browser
 
+It also speaks the real robot's language, so real-robot teleop code can drive the sim:
+    POST /action       {"action": {"left_arm_shoulder_pan.pos": ..., "x.vel": ..., ...}}
+                       the real XLeRobot's action dict (LeRobot units); converted with the
+                       arm calibration. Takes priority over keyboard/gamepad while it keeps
+                       arriving (tools/joycon_sim_client.py sends it from XLeRobot's Joy-Con code).
+    GET  /observation  the sim's state as the real robot's observation dict (LeRobot units).
+
 Start it with scripts/start_teleop_isaac.sh (submits the job and sets up the relay), or by
 hand inside a GPU job:
 
@@ -26,12 +33,14 @@ saves the frames and exits.
 """
 
 import argparse
+import json
 import os
 import sys
 import secrets
 import socket
 import threading
 import time
+from urllib.parse import urlparse
 
 from isaaclab.app import AppLauncher
 
@@ -46,9 +55,8 @@ parser.add_argument("--token", default=None)
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--selftest", action="store_true", help="scripted keys, no browser; prints PASS/FAIL")
 parser.add_argument("--leader_calibration", default="calibration/my_leader.json",
-                    help="SO-101 leader arm calibration (LeRobot format), relative to the repo")
-parser.add_argument("--follower_calibration", default="calibration/my_follower.json",
-                    help="calibration of the simulated follower arm; a copy of the leader's by default")
+                    help="SO-101 leader arm calibration (LeRobot format), relative to the repo. The sim arms "
+                         "use the follower calibration in xle_leisaac/robots/calibration.py (ARM_CALIBRATION_FILES)")
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
 args.headless = True
@@ -64,9 +72,15 @@ from isaaclab.sensors import TiledCameraCfg  # noqa: E402
 from isaaclab_tasks.utils import parse_env_cfg  # noqa: E402
 
 import xle_leisaac  # noqa: F401, E402  (registers XLeRobot-Sandbox-v0)
-from xle_leisaac.robots.xlerobot import REST_ARM_POSE  # noqa: E402
+from xle_leisaac.robots.xlerobot import (  # noqa: E402
+    ARM_CALIBRATION,
+    REST_ARM_POSE,
+    XLEROBOT_ACTION_KEYS,
+    lerobot_to_sim_action,
+    sim_to_lerobot_action,
+)
 from xle_leisaac.teleop.command_to_action import JOINTS, REPO, IsaacTeleopAdapter  # noqa: E402  (also loads xlerobot_sim)
-from xle_leisaac.teleop.leader_arm import HOMED_TICKS, TICKS_PER_TURN, LeaderToSim, load_calibration  # noqa: E402
+from xle_leisaac.teleop.leader_arm import TICKS_PER_TURN, LeaderToSim, load_calibration, range_mid  # noqa: E402
 from xlerobot_sim import teleop_web as web  # noqa: E402
 from xlerobot_sim.teleop_controller import GAMEPAD_HELP, KEY_HELP, gamepad_command, keyboard_command  # noqa: E402
 
@@ -92,9 +106,41 @@ def build_page(token):
             .replace("__PAD__", web._help_rows(GAMEPAD_HELP + EXTRA_PAD)))
 
 
+REAL_ACTION_TIMEOUT = 0.5  # s without a new /action -> back to keyboard/gamepad
+
+
+def make_handler(state, token, page):
+    """The ManiSkill page's HTTP handler, plus /action and /observation for real-robot code."""
+    base = web.make_handler(state, token, page)
+
+    class Handler(base):
+        def do_GET(self):
+            if urlparse(self.path).path == "/observation":
+                if self._authorized():
+                    with state.lock:
+                        body = json.dumps(state.observation).encode()
+                    self._send(200, body, "application/json")
+                return
+            super().do_GET()
+
+        def do_POST(self):
+            if urlparse(self.path).path == "/action":
+                if self._authorized():
+                    data = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+                    with state.lock:
+                        state.real_action = data.get("action", {})
+                        state.real_action_time = time.time()
+                        state.real_action_source = data.get("source", "client")
+                    self._send(200, b"{}", "application/json")
+                return
+            super().do_POST()
+
+    return Handler
+
+
 def start_server(state):
     token = args.token or secrets.token_urlsafe(12)
-    handler = web.make_handler(state, token, build_page(token))
+    handler = make_handler(state, token, build_page(token))
     first = args.port or 20000 + os.getuid() % 20000
     for port in range(first, first + 20):
         try:
@@ -154,13 +200,15 @@ def selftest_leader_ticks(cal):
         if joint == "gripper":
             c = cal[joint]
             ticks.append(c["range_min"] + value / 100.0 * (c["range_max"] - c["range_min"]))
-        else:
-            ticks.append(HOMED_TICKS + value * TICKS_PER_TURN / 360.0)
+        else:  # degrees from the middle of the calibrated range (LeRobot's degree mode)
+            ticks.append(range_mid(cal[joint]) + value * TICKS_PER_TURN / 360.0)
     return ticks
 
 
 def main():
     state = web.SharedState()
+    state.real_action, state.real_action_time, state.real_action_source = {}, 0.0, None
+    state.observation = {}
     server = None if args.selftest else start_server(state)
 
     env_cfg = parse_env_cfg(args.task, device=args.device, num_envs=1)
@@ -181,9 +229,9 @@ def main():
     adapter = IsaacTeleopAdapter(current_state(), rest)
     try:  # the leader arm is optional: without valid calibration files, keys and gamepad still work
         leader_cal = load_calibration(os.path.join(REPO, args.leader_calibration))
-        follower_cal = load_calibration(os.path.join(REPO, args.follower_calibration))
-        leader_to_sim = LeaderToSim(leader_cal, follower_cal, adapter.arm.limits)
-        print(f"[teleop] leader arm calibration {args.leader_calibration}, follower {args.follower_calibration}")
+        # Each sim arm uses its own follower calibration, the same one that converts recorded data.
+        leader_to_sim = {side: LeaderToSim(leader_cal, ARM_CALIBRATION[side]) for side in ("left", "right")}
+        print(f"[teleop] leader arm calibration {args.leader_calibration}; followers from calibration.py")
     except (OSError, ValueError, KeyError) as e:
         if args.selftest:
             raise
@@ -195,6 +243,7 @@ def main():
     dt_min = 1.0 / args.max_fps
     t_prev, fps, step = time.time(), 0.0, 0
     prev_pad_buttons = []
+    driven_externally = False  # True while /action is driving the robot
     start_pose = robot.data.joint_pos[0, :3].clone()
     snap = {}
     try:
@@ -229,12 +278,27 @@ def main():
             elif pad:
                 pad_info = f"unsupported layout ({pad.get('mapping') or 'non-standard'}): {pad.get('id')}"
 
-            action = adapter.step(cmd, pressed=pressed, edges=edges, gamepad=pad)
+            with state.lock:
+                real = dict(state.real_action) if t0 - state.real_action_time < REAL_ACTION_TIMEOUT else None
+                source = state.real_action_source
+            if real:
+                # A real-robot action dict (e.g. from XLeRobot's Joy-Con code): fill in any key it
+                # leaves out from the current state (positions) or zero (base speeds), then convert.
+                current_real = dict(zip(XLEROBOT_ACTION_KEYS, sim_to_lerobot_action(current_state()[None])[0]))
+                values = [real.get(k, 0.0 if k.endswith(".vel") else current_real[k]) for k in XLEROBOT_ACTION_KEYS]
+                action = lerobot_to_sim_action(np.array([values]))[0].astype(np.float32)
+                pad_info = f"real-robot actions from {source}"
+                driven_externally = True
+            else:
+                if driven_externally:
+                    adapter.reset(current_state())  # take over from where the external driver left the robot
+                driven_externally = False
+                action = adapter.step(cmd, pressed=pressed, edges=edges, gamepad=pad)
             leader_arms = []
-            for name, ticks in (leader.items() if leader_to_sim else ()):  # leader overrides keys/gamepad for its arm
+            for name, ticks in (leader.items() if leader_to_sim else ()):  # a leader arm overrides its arm, whatever drives the rest
                 try:
-                    q = leader_to_sim([float(t) for t in ticks][:6])
-                except (TypeError, ValueError, IndexError):
+                    q = leader_to_sim[name]([float(t) for t in ticks][:6])
+                except (KeyError, TypeError, ValueError, IndexError):
                     continue
                 side = 1 if name == "right" else 0  # action 0:6 = left arm, 6:12 = right arm
                 action[6 * side:6 * side + 6] = q
@@ -243,6 +307,9 @@ def main():
             with torch.inference_mode():
                 obs, *_ = env.step(torch.as_tensor(action, device=env.device).unsqueeze(0))
             step += 1
+            observation = dict(zip(XLEROBOT_ACTION_KEYS, (float(v) for v in sim_to_lerobot_action(current_state()[None])[0])))
+            with state.lock:
+                state.observation = observation
 
             frames = {name: web.to_uint8_image(env.scene[sensor].data.output["rgb"]) for name, sensor in STREAMS.items()}
             jpgs = {k: cv2.imencode(".jpg", cv2.cvtColor(v, cv2.COLOR_RGB2BGR), enc)[1].tobytes() for k, v in frames.items()}
@@ -290,10 +357,10 @@ def main():
         drove_forward = drove[0] * np.cos(yaw) + drove[1] * np.sin(yaw)
 
         def pitch(state, side):
-            return adapter.arm.pitch(dict(zip(JOINTS, state[6 * side:6 * side + 6])))
+            return adapter.arms[side].pitch(dict(zip(JOINTS, state[6 * side:6 * side + 6])))
 
         final = current_state()
-        want = leader_to_sim(selftest_leader_ticks(leader_cal))
+        want = leader_to_sim["left"](selftest_leader_ticks(leader_cal))
         leader_err = np.degrees(np.abs(final[0:6] - want))
         mapping_err = [abs(np.degrees(want[i]) - SELFTEST_LEADER_DEG[j]) for i, j in enumerate(JOINTS[:5])]
         checks = {
@@ -313,7 +380,7 @@ def main():
             "pad: LB + left stick changed left wrist pitch": abs(pitch(p3, 0) - pitch(p2, 0)) > 0.1,
             # only meaningful when the follower uses the leader's calibration (then angles copy 1:1)
             "leader ticks -> joint angles (same calibration both sides)":
-                max(mapping_err) < 0.2 if leader_cal == follower_cal else True,
+                max(mapping_err) < 0.2 if leader_cal == ARM_CALIBRATION["left"] else True,
             "leader drove left arm to its pose (< 3 deg)": leader_err.max() < 3.0,
             "right arm stayed put while the leader drove the left": np.abs(final[6:12] - p3[6:12]).max() < 0.02,
         }

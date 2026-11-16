@@ -191,15 +191,15 @@ Keyboard and gamepad keep driving the base, the head and the other arm.
 If the script stops or loses the arm for 0.5 s, keys and gamepad take that arm over again from where it is.
 
 **Calibration.** Same chain as LeRobot teleoperation, with the follower simulated:
-leader ticks → normalised value with the leader calibration `calibration/my_leader.json` →
-follower ticks with the follower calibration `calibration/my_follower.json` → sim joint angle.
-`my_follower.json` is a copy of `my_leader.json`, so each sim joint copies the leader joint's angle
-one to one (angle = (ticks − 2047) · 360/4096, the calibration pose being 0, as in the official
-SO-101 `new_calib` model). The gripper is the exception: the leader's trigger range is spread over the
-sim gripper's range (closed −10° to open 100°). Set `drive_mode` to 1 for a joint in `my_follower.json`
-to flip its direction; use other files with `--leader_calibration` / `--follower_calibration`.
+leader ticks → normalised value with the leader calibration `calibration/my_leader.json` (the value a
+real follower would be sent) → sim joint angle with the follower calibration in
+`xle_leisaac/robots/calibration.py` (`ARM_CALIBRATION_FILES`, `calibration/my_follower.json` for both
+arms for now). That last step is the same conversion recorded data and the Joy-Con input (section 3F)
+use, so all three agree: the middle of each joint's calibrated range is sim angle 0, its ends are the
+sim joint limits. The gripper's 0..100 is spread over the sim gripper's range (closed −10° to open
+100°). A different leader file: `--leader_calibration`.
 
-Check a calibration without a GPU (prints the sim angle at each end of every joint's range):
+Check a calibration without a GPU (prints the sim angle at the ends and middle of every joint's range):
 
 ```bash
 source env.local.sh && python3 tools/check_leader_mapping.py
@@ -252,6 +252,61 @@ are turned Z-up; per-instance furniture scale is baked into the furniture files 
 is scaled too); each articulation's root link is made its asset origin (Isaac Lab places the root
 link at the spawn pose on every reset); slightly tilted furniture is made upright; objects that
 start sunk into a surface are lifted; room doors are left out, as in ManiSkill.
+
+### F. Joy-Con in the lab (XLeRobot's own Joy-Con code drives the sim)
+
+The lab laptop runs XLeRobot's real-robot Joy-Con teleop (`examples/7_xlerobot_teleop_joycon.py`)
+**unchanged**, but sends its actions to the sim instead of the robot. The sim converts them with
+the arm calibration in `calibration/`, so it reacts as the real robot would.
+
+On the **lab laptop** (Linux, the same Python env you use for the real XLeRobot: `lerobot`,
+XLeRobot's `xlerobot_model` + `lerobot_robot_xlerobot` plugins, and `joycon-robotics`):
+
+1. Pair both Joy-Cons (XLeRobot docs: hold sync, pair in Bluetooth settings, press L + R).
+2. On Marvin (VS Code terminal): `bash scripts/start_teleop_isaac.sh`, and wait for the URL.
+3. On the laptop, open the tunnel the script prints (`ssh -N -L <port>:localhost:<port> ...`).
+4. On the laptop, start the Joy-Con client with that URL:
+   ```bash
+   python tools/joycon_sim_client.py --url "http://localhost:<port>/?token=<token>" --xlerobot ~/XLeRobot
+   ```
+5. Open the same URL in the laptop's browser to watch the four cameras.
+
+Controls are XLeRobot's, so they match the real robot:
+
+| Joy-Con | Action |
+| --- | --- |
+| Right / left stick | right / left arm: up-down on the stick moves the end effector forward-back and up-down together; left-right turns the shoulder (pan) |
+| R / L, and R-stick / L-stick click | arm up / down |
+| ZR / ZL (hold) | gripper; each new press flips between closing and opening |
+| Tilt the Joy-Con | wrist pitch and roll |
+| Right X / B, Y / A | base: **X drives backward and B forward** in XLeRobot's code (its comments say the opposite); Y / A turn |
+| Left D-pad | head |
+| Right + | arms and head back to the zero pose (Home / Capture resets that Joy-Con's target) |
+
+When the Joy-Con client stops, keyboard and gamepad on the page take over again.
+
+Test without Joy-Cons (scripted fake Joy-Cons, inside a GPU job):
+```bash
+python tools/joycon_sim_client.py --url ... --xlerobot $XLE_THIRD_PARTY/XLeRobot --fake --seconds 20
+```
+
+### G. Xbox controller from an interactive job (view the results live)
+
+```bash
+cd ~/RLP/XLeRobot-Mobile-Manipulation-With-Robo-MME
+bash slurm/sim_interactive.sh                          # waits for an A40, gives a shell in the container
+/isaac-sim/python.sh -m xle_leisaac.teleop.isaac_teleop_web    # prints "Teleop server on <node>:<port>" and the URL
+```
+
+In a second VS Code terminal on the **login node**, relay the port, then open the printed URL in
+your browser and press a button on the Xbox controller:
+
+```bash
+python3 scripts/relay.py <node> <port>       # e.g. mlgpu003 22231; VS Code forwards localhost:<port>
+```
+
+`Ctrl+C` in the first terminal stops the sim; `exit` ends the job. `bash scripts/start_teleop_isaac.sh`
+does the same thing in one step as a batch job.
 
 ## 4. What you can run
 

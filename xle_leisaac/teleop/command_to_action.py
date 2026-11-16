@@ -45,6 +45,8 @@ if "tyro" not in sys.modules:
 sys.path.insert(0, os.path.join(REPO, "tools"))
 from urdf_geometry import Urdf  # noqa: E402
 
+from xle_leisaac.robots import calibration  # noqa: E402
+
 SO101_URDF = os.path.join(os.environ["XLE_THIRD_PARTY"], "so_arm100_urdf/so101_new_calib_camera.urdf")
 JOINTS = ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper")
 
@@ -64,14 +66,14 @@ class So101PlanarArm:
     In the arm's own vertical plane (shoulder pan at 0), shoulder lift and elbow place
     the wrist point (the wrist_flex axis) at (forward, up). Wrist flex then sets the
     gripper's pitch: the angle of the wrist-to-tool line in that plane.
+
+    Geometry comes from the official URDF; joint limits from the arm's real calibration.
     """
 
-    def __init__(self):
+    def __init__(self, calibration_data):
         self.urdf = Urdf(SO101_URDF)
-        self.limits = {}
-        for name in JOINTS:
-            limit = self.urdf.joints[name].find("limit")
-            self.limits[name] = (float(limit.get("lower")), float(limit.get("upper")))
+        self.limits = {name: (math.radians(lo), math.radians(hi))
+                       for name, (lo, hi) in calibration.joint_limits_deg(calibration_data).items()}  # fmt: skip
         # Wrist flex changes the gripper pitch one-for-one; find out in which direction.
         base = {"shoulder_lift": 0.0, "elbow_flex": 0.0}
         self.flex_sign = np.sign(self.pitch({**base, "wrist_flex": 0.1}) - self.pitch({**base, "wrist_flex": 0.0}))
@@ -113,7 +115,8 @@ class IsaacTeleopAdapter:
 
     def __init__(self, current_state, rest_arm):
         """current_state: 17-D state (sim units). rest_arm: 6 joint values the X / Menu reset goes to."""
-        self.arm = So101PlanarArm()
+        # One IK solver per arm, each limited to that arm's calibrated range. 0 = left, 1 = right.
+        self.arms = [So101PlanarArm(calibration.load(calibration.ARM_CALIBRATION_FILES[side])) for side in ("left", "right")]
         self.rest_arm = list(rest_arm)
         steps = TeleopController  # same per-step rates as the ManiSkill controller
         self.ee_step, self.rotation_step = steps.ee_step, steps.rotation_step
@@ -128,8 +131,8 @@ class IsaacTeleopAdapter:
         self.ee, self.pitch = [], []
         for side in (0, 1):  # 0 = left arm (action 0:6), 1 = right arm (action 6:12)
             q = self._arm_q(side)
-            self.ee.append(self.arm.wrist(q))
-            self.pitch.append(self.arm.pitch(q))
+            self.ee.append(self.arms[side].wrist(q))
+            self.pitch.append(self.arms[side].pitch(q))
 
     def set_arm(self, side, q):
         """Set one arm's 6 joint targets from outside (the leader arm). Keys and gamepad
@@ -137,8 +140,8 @@ class IsaacTeleopAdapter:
         o = 6 * side
         self.target[o:o + 6] = q
         arm_q = self._arm_q(side)
-        self.ee[side] = self.arm.wrist(arm_q)
-        self.pitch[side] = self.arm.pitch(arm_q)
+        self.ee[side] = self.arms[side].wrist(arm_q)
+        self.pitch[side] = self.arms[side].pitch(arm_q)
         self.gripper_closed[1 - side] = q[5] < (GRIPPER_OPEN + GRIPPER_CLOSED) / 2  # [right, left] order
 
     def _arm_q(self, side):
@@ -156,14 +159,15 @@ class IsaacTeleopAdapter:
         # TeleopCommand.arm1 is the RIGHT arm, arm2 the LEFT arm (ManiSkill page convention).
         for side, arm_cmd, closed_index in ((1, cmd.arm1, 0), (0, cmd.arm2, 1)):
             o = 6 * side
+            arm = self.arms[side]
             self.ee[side] = self.ee[side] + self.ee_step * np.clip([arm_cmd.ee_x, arm_cmd.ee_y], -1, 1)
             self.pitch[side] += self.pitch_step * float(np.clip(arm_cmd.pitch, -1, 1))
-            lift, elbow = self.arm.solve(self.ee[side], self.target[o + 1], self.target[o + 2])
-            self.ee[side] = self.arm.wrist({"shoulder_lift": lift, "elbow_flex": elbow})  # no wind-up when out of reach
+            lift, elbow = arm.solve(self.ee[side], self.target[o + 1], self.target[o + 2])
+            self.ee[side] = arm.wrist({"shoulder_lift": lift, "elbow_flex": elbow})  # no wind-up when out of reach
             self.target[o + 1], self.target[o + 2] = lift, elbow
-            self.target[o + 3] = self.arm.wrist_flex_for(self.pitch[side], lift, elbow)
+            self.target[o + 3] = arm.wrist_flex_for(self.pitch[side], lift, elbow)
             for joint, rate, step in ((0, arm_cmd.rotation, self.rotation_step), (4, arm_cmd.roll, self.roll_step)):
-                lo, hi = self.arm.limits[JOINTS[joint]]
+                lo, hi = arm.limits[JOINTS[joint]]
                 self.target[o + joint] = float(np.clip(self.target[o + joint] + step * np.clip(rate, -1, 1), lo, hi))
             if arm_cmd.toggle_gripper:
                 self.gripper_closed[closed_index] = not self.gripper_closed[closed_index]

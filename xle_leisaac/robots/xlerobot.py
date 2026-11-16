@@ -22,7 +22,7 @@ import torch
 from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets import ArticulationCfg
 from isaaclab.sensors import TiledCameraCfg
-from leisaac.utils.robot_utils import convert_leisaac_action_to_lerobot, convert_lerobot_action_to_leisaac
+from xle_leisaac.robots import calibration
 
 XLEROBOT_USD_PATH = os.path.join(os.environ["XLE_ASSETS"], "robots/xlerobot_so101/xlerobot_so101.usd")
 
@@ -44,15 +44,16 @@ XLEROBOT_ACTION_KEYS = (
     + ["head_motor_1.pos", "head_motor_2.pos", "x.vel", "y.vel", "theta.vel"]
 )
 
-# SO-101 rest pose (folded), the centre of LeIsaac's SO101_FOLLOWER_REST_POSE_RANGE, in radians.
-REST_ARM_POSE = {
-    "shoulder_pan": 0.0,
-    "shoulder_lift": math.radians(-100.0),
-    "elbow_flex": math.radians(90.0),
-    "wrist_flex": math.radians(50.0),
-    "wrist_roll": 0.0,
-    "gripper": math.radians(-10.0),
-}
+# Real calibration of each arm (see calibration.py); both arms use the same file for now.
+ARM_CALIBRATION = {side: calibration.load(path) for side, path in calibration.ARM_CALIBRATION_FILES.items()}
+
+# Folded rest pose in the real robot's units (LeRobot values): shoulder lift at the bottom of
+# its range, elbow at the top, wrist part-way up, gripper closed. This is LeIsaac's SO-101
+# rest pose expressed in real units, so it lands at the same physical place on any calibration.
+REST_ARM_POSE_REAL = {"shoulder_pan": 0.0, "shoulder_lift": -100.0, "elbow_flex": 100.0,
+                      "wrist_flex": 52.6, "wrist_roll": 0.0, "gripper": 0.0}  # fmt: skip
+_rest_sim = calibration.real_to_sim([[REST_ARM_POSE_REAL[j] for j in SO101_JOINTS]], ARM_CALIBRATION["left"])[0]
+REST_ARM_POSE = dict(zip(SO101_JOINTS, (float(v) for v in _rest_sim)))  # radians
 
 XLEROBOT_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
@@ -167,8 +168,8 @@ RIGHT_WRIST_CAMERA_CFG = _camera(
 
 # --- Conversions between sim joints and the real robot's 17 action values ---------------
 #
-# Arms: the official "new_calib" SO-101 model is defined to match LeRobot's calibration,
-# so LeIsaac's existing SO-101 conversion applies unchanged (degrees -> normalised range).
+# Arms: exact conversion from each arm's real calibration (calibration.py): the value 0 is
+# the middle of the calibrated range, +-100 its ends.
 # Head: sim limits in degrees mapped to -100..100. head_motor_1 is assumed to be pan and
 # head_motor_2 tilt; NOT yet confirmed on the real robot.
 _HEAD_LIMITS_DEG = ((-90.0, 90.0), (-43.5, 83.0))
@@ -182,8 +183,8 @@ def sim_to_lerobot_action(action):
     """
     action = action.detach().cpu().numpy() if isinstance(action, torch.Tensor) else np.asarray(action)
     real = np.zeros_like(action)
-    real[:, 0:6] = convert_leisaac_action_to_lerobot(action[:, 0:6])
-    real[:, 6:12] = convert_leisaac_action_to_lerobot(action[:, 6:12])
+    real[:, 0:6] = calibration.sim_to_real(action[:, 0:6], ARM_CALIBRATION["left"])
+    real[:, 6:12] = calibration.sim_to_real(action[:, 6:12], ARM_CALIBRATION["right"])
     for i, (low, high) in enumerate(_HEAD_LIMITS_DEG):
         real[:, 12 + i] = (np.degrees(action[:, 12 + i]) - low) / (high - low) * 200.0 - 100.0
     real[:, 14:16] = action[:, 14:16]  # m/s in both
@@ -195,8 +196,8 @@ def lerobot_to_sim_action(action):
     """(N, 17) real action -> (N, 17) sim action. The inverse of sim_to_lerobot_action."""
     action = action.detach().cpu().numpy() if isinstance(action, torch.Tensor) else np.asarray(action)
     sim = np.zeros_like(action)
-    sim[:, 0:6] = convert_lerobot_action_to_leisaac(action[:, 0:6])
-    sim[:, 6:12] = convert_lerobot_action_to_leisaac(action[:, 6:12])
+    sim[:, 0:6] = calibration.real_to_sim(action[:, 0:6], ARM_CALIBRATION["left"])
+    sim[:, 6:12] = calibration.real_to_sim(action[:, 6:12], ARM_CALIBRATION["right"])
     for i, (low, high) in enumerate(_HEAD_LIMITS_DEG):
         sim[:, 12 + i] = np.radians((action[:, 12 + i] + 100.0) / 200.0 * (high - low) + low)
     sim[:, 14:16] = action[:, 14:16]
