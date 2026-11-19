@@ -368,7 +368,7 @@ grep -E '\[xsmoke\]|\[record\]|\[check\]|Error' ~/xle_sim_<jobid>.out
 | To change | Edit |
 | --- | --- |
 | Robot gains, limits, cameras, rest pose | `xle_leisaac/robots/xlerobot.py` |
-| Robot geometry or mass (rebuild afterwards) | `tools/build_xlerobot_urdf.py`, then `bash setup/04_xlerobot_asset.sh` |
+| Robot geometry or mass, or after pulling calibration changes (rebuild afterwards) | `tools/build_xlerobot_urdf.py`, then `bash setup/04_xlerobot_asset.sh`. Calibration lives in the built URDF/USD (not in git); the robot config refuses to start with a stale one and prints these commands |
 | Scene, objects, observations, resets, episode length | `xle_leisaac/tasks/sandbox_env_cfg.py` |
 | Apartment: furniture damping, lighting, render quality | `xle_leisaac/tasks/scene_env_cfg.py` |
 | Apartment: conversion (robot start, ceiling lights, materials), then `bash setup/06_replicacad.sh` | `tools/build_replicacad_usd.py` |

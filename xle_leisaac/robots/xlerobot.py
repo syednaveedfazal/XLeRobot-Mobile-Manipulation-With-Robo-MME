@@ -47,6 +47,18 @@ XLEROBOT_ACTION_KEYS = (
 # Real calibration of each arm (see calibration.py); both arms use the same file for now.
 ARM_CALIBRATION = {side: calibration.load(path) for side, path in calibration.ARM_CALIBRATION_FILES.items()}
 
+# Stop early, with the fix, if the robot model on disk was built from an older calibration.
+_stale = calibration.check_built_robot(XLEROBOT_USD_PATH.replace(".usd", ".urdf"), XLEROBOT_USD_PATH)
+if _stale:
+    raise RuntimeError(
+        "The XLeRobot model in $XLE_ASSETS does not match the current calibration code:\n  - "
+        + "\n  - ".join(_stale)
+        + "\nRebuild it (after pulling changes to calibration/ or xle_leisaac/robots/calibration.py):\n"
+        "  login node:  python3 tools/build_xlerobot_urdf.py\n"
+        "  GPU job:     /isaac-sim/python.sh tools/build_xlerobot_usd.py\n"
+        "  (or both:    bash setup/04_xlerobot_asset.sh)"
+    )
+
 # Folded rest pose in the real robot's units (LeRobot values): shoulder lift at the bottom of
 # its range, elbow at the top, wrist part-way up, gripper closed. This is LeIsaac's SO-101
 # rest pose expressed in real units, so it lands at the same physical place on any calibration.

@@ -124,6 +124,35 @@ def check(calibration, name="calibration"):
     return problems
 
 
+
+def check_built_robot(urdf_path, usd_path):
+    """Problems if the built robot (URDF + USD in $XLE_ASSETS) does not match the calibration code.
+
+    Joint limits are baked into those generated files, which git does not track. After pulling a
+    change to calibration/ or this file they must be rebuilt, or Isaac Lab fails with
+    "default positions out of the limits". Empty list = up to date.
+    """
+    import math
+    import xml.etree.ElementTree as ET
+
+    if not os.path.exists(urdf_path) or not os.path.exists(usd_path):
+        return [f"robot model not built yet ({urdf_path} / {usd_path} missing)"]
+    problems = []
+    root = ET.parse(urdf_path).getroot()
+    for side, path in ARM_CALIBRATION_FILES.items():
+        for joint, (lo, hi) in joint_limits_deg(load(path)).items():
+            limit = root.find(f"joint[@name='{side}_arm_{joint}']/limit")
+            if limit is None:
+                problems.append(f"{side}_arm_{joint} missing from the built URDF")
+                continue
+            built = (float(limit.get("lower")), float(limit.get("upper")))
+            if abs(built[0] - math.radians(lo)) > 1e-5 or abs(built[1] - math.radians(hi)) > 1e-5:
+                problems.append(f"{side}_arm_{joint}: built limits {math.degrees(built[0]):+.1f}..{math.degrees(built[1]):+.1f} deg, "
+                                f"calibration says {lo:+.1f}..{hi:+.1f} deg")
+    if os.path.getmtime(usd_path) < os.path.getmtime(urdf_path):
+        problems.append("the USD is older than the URDF (URDF rebuilt but not converted to USD yet)")
+    return problems
+
 if __name__ == "__main__":
     for side, path in ARM_CALIBRATION_FILES.items():
         cal = load(path)

@@ -138,8 +138,10 @@ def main():
             raise SystemExit("bad calibration: " + "; ".join(problems))
         for joint, (lo, hi) in calibration.joint_limits_deg(cal).items():
             limit = robot.find(f"joint[@name='{prefix}{joint}']/limit")
-            limit.set("lower", f"{math.radians(lo):.6f}")
-            limit.set("upper", f"{math.radians(hi):.6f}")
+            # Round outward (lower down, upper up) at 1e-6 rad, so a pose exactly at the end of
+            # the real range (e.g. the rest pose, shoulder lift at value -100) stays inside it.
+            limit.set("lower", f"{math.floor(math.radians(lo) * 1e6) / 1e6:.6f}")
+            limit.set("upper", f"{math.ceil(math.radians(hi) * 1e6) / 1e6:.6f}")
         print(f"[urdf] {prefix[:-1]} limits from {os.path.relpath(cal_path)}:")
         print("\n".join("[urdf]   " + line for line in calibration.describe(cal).splitlines()))
 
