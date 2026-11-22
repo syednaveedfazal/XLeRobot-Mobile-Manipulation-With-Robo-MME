@@ -231,8 +231,13 @@ class XLeRobotSandboxEnvCfg(ManagerBasedRLEnvCfg):
 
     def __post_init__(self):
         super().__post_init__()
-        self.sim.dt = 1 / 60  # physics at 60 Hz
+        self.sim.dt = 1 / 60  # physics at 60 Hz, as in LeIsaac
         self.decimation = 2  # one action every 2 physics steps -> 30 Hz, like the real cameras
+        # Grasping settings from LeIsaac's SO-101 tasks. Contacts closer together than the friction
+        # correlation distance share one friction anchor; at the default 2.5 cm everything the
+        # SO-101 tips touch collapses into one point and slides out of the grip.
+        self.sim.physx.friction_correlation_distance = 0.00625
+        self.sim.physx.bounce_threshold_velocity = 0.01
         self.sim.render_interval = self.decimation
         self.episode_length_s = 60.0
         self.viewer.eye = (-1.5, -2.0, 1.8)
