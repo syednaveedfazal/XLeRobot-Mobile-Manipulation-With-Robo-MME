@@ -42,7 +42,8 @@ parser.add_argument("--batch_size", type=int, default=64)
 parser.add_argument("--num_workers", type=int, default=8)
 args = parser.parse_args()
 
-ds = LeRobotDataset(args.repo_id, root=args.root)
+# PyAV: torchcodec (LeRobot's default) needs system FFmpeg libraries the container does not have.
+ds = LeRobotDataset(args.repo_id, root=args.root, video_backend="pyav")
 if args.camera not in ds.meta.camera_keys:
     raise SystemExit(f"{args.camera} not in dataset cameras {ds.meta.camera_keys}")
 n = ds.meta.total_frames

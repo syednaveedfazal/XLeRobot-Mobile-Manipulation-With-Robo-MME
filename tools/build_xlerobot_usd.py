@@ -34,7 +34,9 @@ def main():
         make_instanceable=True,
         force_usd_conversion=True,
         self_collision=False,
-        collider_type="convex_hull",
+        # Convex decomposition, not one hull per link: the gripper link's single hull would
+        # fill the gap between the jaws and make real grasps impossible.
+        collider_type="convex_decomposition",
         joint_drive=UrdfConverterCfg.JointDriveCfg(
             gains=UrdfConverterCfg.JointDriveCfg.PDGainsCfg(stiffness=0.0, damping=0.0)
         ),

@@ -21,3 +21,11 @@ gym.register(
     disable_env_checker=True,
     kwargs={"env_cfg_entry_point": "xle_leisaac.tasks.scene_env_cfg:XLeRobotSceneEnvCfg"},
 )
+
+# Place-memory task: take a cup from one of 3 identical stations to a work table, then put it back.
+gym.register(
+    id="XLeRobot-PutItBack-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={"env_cfg_entry_point": "xle_leisaac.tasks.put_it_back_env_cfg:XLeRobotPutItBackEnvCfg"},
+)

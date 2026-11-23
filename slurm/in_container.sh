@@ -19,7 +19,8 @@ source "$REPO/env.local.sh"
 # see setup/05_pi_deps.sh). It is opt-in so Isaac Sim keeps the image's transformers.
 PI_ENV=()
 if [ "${XLE_WITH_PI:-0}" = "1" ]; then
-    PI_ENV=(--env PYTHONPATH="$XLE_PYDEPS_PI")
+    # The repo too: xle_policies came with a later merge than the editable install of this repo.
+    PI_ENV=(--env PYTHONPATH="$XLE_PYDEPS_PI:$REPO")
 fi
 
 # --nv            bring in the host's NVIDIA driver libraries

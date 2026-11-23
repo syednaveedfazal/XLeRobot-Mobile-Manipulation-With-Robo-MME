@@ -20,8 +20,10 @@ import sys
 import xle_leisaac  # noqa: F401  (registers XLeRobot-Sandbox-v0; needs no simulator yet)
 
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument("--hdf5_file", default=os.path.join(os.environ["XLE_DATA"], "hdf5", "xle_sandbox_v0.hdf5"))
+parser.add_argument("--hdf5_file", nargs="+", default=[os.path.join(os.environ["XLE_DATA"], "hdf5", "xle_sandbox_v0.hdf5")],
+                    help="one or more HDF5 files, all in the same folder (merged into one dataset)")
 parser.add_argument("--repo_id", default="local/xle_sandbox_v0")
+parser.add_argument("--task", default="XLeRobot-Sandbox-v0", help="gym id the HDF5 was recorded with")
 parser.add_argument("--overwrite", action="store_true", help="delete an existing dataset with this repo_id first")
 args = parser.parse_args()
 
@@ -31,14 +33,26 @@ if os.path.exists(target):
         sys.exit(f"{target} already exists; pass --overwrite to replace it")
     shutil.rmtree(target)
 
+folders = {os.path.dirname(f) for f in args.hdf5_file}
+if len(folders) != 1:
+    sys.exit("all --hdf5_file files must be in the same folder")
 script = os.path.join(os.environ["XLE_THIRD_PARTY"], "leisaac/scripts/convert/isaaclab2lerobotv3.py")
 sys.argv = [
     script,
-    "--task_name", "XLeRobot-Sandbox-v0",
+    "--task_name", args.task,
     "--repo_id", args.repo_id,
     "--fps", "30",
-    "--hdf5_root", os.path.dirname(args.hdf5_file),
-    "--hdf5_files", os.path.basename(args.hdf5_file),
+    "--hdf5_root", folders.pop(),
+    "--hdf5_files", ",".join(os.path.basename(f) for f in args.hdf5_file),
 ]  # fmt: skip
-runpy.run_path(script, run_name="__main__")
-print(f"[convert] dataset at {target}")
+os.environ["XLE_VIDEO_CAMERA"] = "0"  # video-only cameras are not dataset features (put_it_back_env_cfg.py)
+try:
+    runpy.run_path(script, run_name="__main__")
+    print(f"[convert] dataset at {target}", flush=True)
+except BaseException:
+    import traceback
+
+    traceback.print_exc()
+    sys.stdout.flush()
+    os._exit(1)  # without this a crash leaves Isaac Sim running until the job's time limit
+os._exit(0)
