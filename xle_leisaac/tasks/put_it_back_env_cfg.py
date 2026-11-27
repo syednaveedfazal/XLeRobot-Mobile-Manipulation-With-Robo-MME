@@ -1,7 +1,8 @@
 """XLeRobot-PutItBack-v0: a place-memory task.
 
-Take a small block (2 x 2 x 4 cm, like a 2x2x4 Rubik's cuboid; the code calls it the cube) from one of K identical stations to a work table,
-then return it to the station it came from. While the robot is at the work table the stations are behind it, so on the
+Take a box with a handle (a 6 cm Rubik's-style box with a red 2 x 2 x 4 cm handle on top; the code
+calls it the cube) from one of K identical stations to a work table, then return it to the station
+it came from. While the robot is at the work table the stations are behind it, so on the
 way back nothing in view says which station was the right one: the policy has to remember.
 
 Layout (metres, env-local frame, robot starts at the origin facing +x):
@@ -9,15 +10,21 @@ Layout (metres, env-local frame, robot starts at the origin facing +x):
     stations   K = 3 identical pedestals in a row on the robot's right, at x = 0.7, 1.2, 1.7,
                y = -0.35, top at 0.70 m (the lab's table height). The arms reach ~0.2 m past the
                cart's side, so the robot drives along the row and grasps sideways with its right arm.
-    cube       on one station, chosen at random on every reset (seeded), shifted up to 2 cm and
-               turned up to 9 degrees. The robot's start is jittered too.
+    cube       on one station, chosen at random on every reset (seeded; or cycled 0, 1, 2, ... with
+               cfg.balanced_stations, for recording), shifted up to 2 cm and turned up to
+               9 degrees. Grasped by its handle. The robot's start is jittered too.
     work table a four-legged table, 60 x 40 cm top at 0.70 m, behind the start at x = -0.9. The
                robot turns around, so the table is on its right again and the stations are
                behind it, out of the cameras' view.
 
+Room: four walls about 2 m from the robot's path, a shelf, a sofa, a cabinet and a door, all
+               along the walls and the same in every episode (no cue to the cube's station), so the
+               cameras see a room instead of an endless floor. Keep it unchanged between recording
+               and evaluation: the policy learns from these images.
+
 Success: after the cube has been set down on the work table, it rests again on the station it
 started on and the gripper has let go. Failure: the cube is set down on a wrong station, or
-dropped. Otherwise the episode times out after 90 s.
+dropped. Otherwise the episode times out after 120 s.
 
 Everything else (17-D action, observations, LeIsaac recording hooks) is the sandbox's.
 """
@@ -48,9 +55,23 @@ STATION_SIZE = (0.14, 0.14, STATION_TOP)
 WORK_TABLE_PLACE = (-0.9, 0.35)  # where the cube is set down on the work table
 WORK_TABLE_TOP = 0.70  # tools/build_props_usd.py work_table(): 60 x 40 cm top, four legs
 WORK_TABLE_CENTRE = (WORK_TABLE_PLACE[0], WORK_TABLE_PLACE[1] + 0.12)  # near edge 8 cm inside the place spot, 4 cm off the cart
-BLOCK_SIZE = (0.02, 0.02, 0.04)  # tools/build_props_usd.py BLOCK: upright 2 x 2 x 4 cm
-GRASP_HEIGHT = 0.017  # tool point above the block's bottom: pinched above its low centre of mass, jaw tips 1.1 cm above the surface
+BOX_SIZE = 0.06  # tools/build_props_usd.py BOX: 6 cm box ...
+HANDLE_SIZE = (0.02, 0.02, 0.04)  # ... with this handle on top (HANDLE)
+GRASP_HEIGHT = BOX_SIZE + 0.017  # tool point above the cube's bottom: 1.7 cm up the handle, jaw tips 1.1 cm above the box
 STATION_COLOR = (0.62, 0.62, 0.66)
+# Room (env-local): walls around the area the robot uses (x -1.3..2.1, |y| < 0.7), furniture
+# along the walls only. (size xyz, centre xy, colour); boxes stand on the floor.
+ROOM_X, ROOM_Y, WALL_HEIGHT, WALL_THICKNESS = (-2.1, 2.7), (-1.9, 1.9), 2.5, 0.1
+WALL_COLOR = (0.86, 0.83, 0.76)
+FURNITURE = dict(
+    shelf=((0.35, 0.9, 1.8), (2.45, 1.30), (0.36, 0.23, 0.13)),
+    sofa_seat=((1.9, 0.85, 0.42), (0.60, 1.42), (0.30, 0.36, 0.46)),
+    sofa_back=((1.9, 0.2, 0.85), (0.60, 1.75), (0.27, 0.32, 0.42)),
+    cabinet=((0.8, 0.5, 0.9), (-1.50, -1.60), (0.90, 0.90, 0.88)),
+    door=((0.9, 0.03, 2.05), (-0.40, -1.835), (0.42, 0.27, 0.16)),
+)
+# Overview video camera (videos only, not a policy input), inside the room.
+OVERVIEW_EYE, OVERVIEW_TARGET = (0.3, -1.75, 2.15), (0.3, 0.1, 0.6)
 # Reset randomisation, so demonstrations differ beyond the station choice (uniform, +-):
 CUBE_JITTER = (0.02, 0.015, 0.15)  # cube on its station: x, y (m), yaw (rad)
 BASE_JITTER = (0.05, 0.03, 0.08)  # robot start: x, y (m), yaw (rad)
@@ -88,13 +109,32 @@ class PutItBackSceneCfg(InteractiveSceneCfg):
     station_2 = _static_box(STATION_SIZE, (STATION_XS[2], STATION_Y, STATION_TOP / 2), STATION_COLOR).replace(
         prim_path="{ENV_REGEX_NS}/station_2"
     )
+    wall_far = _static_box((WALL_THICKNESS, ROOM_Y[1] - ROOM_Y[0], WALL_HEIGHT),
+                           (ROOM_X[1], 0.0, WALL_HEIGHT / 2), WALL_COLOR).replace(prim_path="{ENV_REGEX_NS}/wall_far")
+    wall_near = _static_box((WALL_THICKNESS, ROOM_Y[1] - ROOM_Y[0], WALL_HEIGHT),
+                            (ROOM_X[0], 0.0, WALL_HEIGHT / 2), WALL_COLOR).replace(prim_path="{ENV_REGEX_NS}/wall_near")
+    wall_left = _static_box((ROOM_X[1] - ROOM_X[0], WALL_THICKNESS, WALL_HEIGHT),
+                            ((ROOM_X[0] + ROOM_X[1]) / 2, ROOM_Y[1], WALL_HEIGHT / 2), WALL_COLOR).replace(prim_path="{ENV_REGEX_NS}/wall_left")
+    wall_right = _static_box((ROOM_X[1] - ROOM_X[0], WALL_THICKNESS, WALL_HEIGHT),
+                             ((ROOM_X[0] + ROOM_X[1]) / 2, ROOM_Y[0], WALL_HEIGHT / 2), WALL_COLOR).replace(prim_path="{ENV_REGEX_NS}/wall_right")
+    shelf = _static_box(FURNITURE["shelf"][0], (*FURNITURE["shelf"][1], FURNITURE["shelf"][0][2] / 2),
+                        FURNITURE["shelf"][2]).replace(prim_path="{ENV_REGEX_NS}/shelf")
+    sofa_seat = _static_box(FURNITURE["sofa_seat"][0], (*FURNITURE["sofa_seat"][1], FURNITURE["sofa_seat"][0][2] / 2),
+                            FURNITURE["sofa_seat"][2]).replace(prim_path="{ENV_REGEX_NS}/sofa_seat")
+    sofa_back = _static_box(FURNITURE["sofa_back"][0], (*FURNITURE["sofa_back"][1], FURNITURE["sofa_back"][0][2] / 2),
+                            FURNITURE["sofa_back"][2]).replace(prim_path="{ENV_REGEX_NS}/sofa_back")
+    cabinet = _static_box(FURNITURE["cabinet"][0], (*FURNITURE["cabinet"][1], FURNITURE["cabinet"][0][2] / 2),
+                          FURNITURE["cabinet"][2]).replace(prim_path="{ENV_REGEX_NS}/cabinet")
+    door = _static_box(FURNITURE["door"][0], (*FURNITURE["door"][1], FURNITURE["door"][0][2] / 2),
+                       FURNITURE["door"][2]).replace(prim_path="{ENV_REGEX_NS}/door")
+
     work_table = AssetBaseCfg(
         prim_path="{ENV_REGEX_NS}/work_table",
         spawn=sim_utils.UsdFileCfg(usd_path=os.path.join(os.environ["XLE_ASSETS"], "props", "work_table.usd")),
         init_state=AssetBaseCfg.InitialStateCfg(pos=(WORK_TABLE_CENTRE[0], WORK_TABLE_CENTRE[1], 0.0)),
     )
 
-    # The block (tools/build_props_usd.py: 2 x 2 x 4 cm, 60 g, low centre of mass). Its start
+    # The cube (tools/build_props_usd.py: 6 cm box with a red 2 x 2 x 4 cm handle, 80 g). Its start
     # pose is set by the reset event below.
     cube = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/cube",
@@ -114,7 +154,7 @@ class PutItBackSceneCfg(InteractiveSceneCfg):
     # Fixed overview camera for videos (not part of the policy's observations).
     overview = TiledCameraCfg(
         prim_path="{ENV_REGEX_NS}/overview",
-        offset=TiledCameraCfg.OffsetCfg(pos=(0.4, -2.9, 2.3)),  # aimed with set_world_poses_from_view by the tools
+        offset=TiledCameraCfg.OffsetCfg(pos=OVERVIEW_EYE),  # aimed with set_world_poses_from_view by the tools
         data_types=["rgb"],
         spawn=sim_utils.PinholeCameraCfg(focal_length=10.0, clipping_range=(0.05, 30.0)),
         width=640,
@@ -132,7 +172,12 @@ def place_cube_at_random_station(env, env_ids: torch.Tensor):
     """
     if not hasattr(env, "put_it_back_station"):
         env.put_it_back_station = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
-    choice = torch.randint(0, K, (len(env_ids),), device=env.device)
+    if getattr(env.cfg, "balanced_stations", False):  # 0, 1, 2, 0, ... so recorded demos are balanced
+        count = getattr(env, "put_it_back_resets", 0)
+        choice = (torch.arange(len(env_ids), device=env.device) + count) % K
+        env.put_it_back_resets = count + len(env_ids)
+    else:
+        choice = torch.randint(0, K, (len(env_ids),), device=env.device)
     env.put_it_back_station[env_ids] = choice
     cube = env.scene["cube"]
     xs = torch.tensor(STATION_XS, device=env.device)[choice]
@@ -230,12 +275,17 @@ class XLeRobotPutItBackEnvCfg(XLeRobotSandboxEnvCfg):
     events: PutItBackEventsCfg = PutItBackEventsCfg()
     terminations: PutItBackTerminationsCfg = PutItBackTerminationsCfg()
     task_description: str = "Take the cube to the work table, then put it back on the station it came from."
+    balanced_stations: bool = False  # cycle the cube's station 0, 1, 2, ... instead of random (recording)
 
     def __post_init__(self):
         super().__post_init__()
-        self.episode_length_s = 90.0
-        self.viewer.eye = (0.4, -2.9, 2.3)
-        self.viewer.lookat = (0.4, 0.0, 0.6)
+        self.episode_length_s = 150.0  # the table wait lasts until 60-75 s (B12 fix); the drive back and set-down take ~25-40 s more
+        # Redraw the cameras right after a reset. Otherwise the first image of an episode is the
+        # previous episode's last frame (or an old render), and the policy plans its first 1.7 s from
+        # it (BUGS.md B6). Recording is unaffected: the converter drops the first 5 steps anyway.
+        self.rerender_on_reset = True
+        self.viewer.eye = OVERVIEW_EYE
+        self.viewer.lookat = OVERVIEW_TARGET
         # The overview camera is for our videos only, never recorded. LeIsaac's converter turns
         # every camera in the scene into a dataset feature, so tools/convert_to_lerobot.py sets
         # XLE_VIDEO_CAMERA=0 to build the scene without it.
@@ -246,5 +296,6 @@ class XLeRobotPutItBackEnvCfg(XLeRobotSandboxEnvCfg):
 # Exposed for the scripted expert.
 LAYOUT = dict(
     K=K, STATION_XS=STATION_XS, STATION_Y=STATION_Y, STATION_TOP=STATION_TOP, WORK_TABLE_PLACE=WORK_TABLE_PLACE,
-    WORK_TABLE_TOP=WORK_TABLE_TOP, GRASP_HEIGHT=GRASP_HEIGHT,
+    WORK_TABLE_TOP=WORK_TABLE_TOP, GRASP_HEIGHT=GRASP_HEIGHT, BOX_SIZE=BOX_SIZE, HANDLE_SIZE=HANDLE_SIZE,
+    OVERVIEW_EYE=OVERVIEW_EYE, OVERVIEW_TARGET=OVERVIEW_TARGET,
 )  # fmt: skip

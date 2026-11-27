@@ -27,6 +27,13 @@ into joint angles with LeRobot calibration files (leader_arm.py). While leader d
 arrives, that arm follows the leader; when it stops for 0.5 s, keys and gamepad take over
 again from the current pose.
 
+--policy <checkpoint> lets a trained pi0.5 policy drive instead of keys/gamepad (needs XLE_WITH_PI=1;
+scripts/watch_policy.sh sets it all up). It gets what it was trained on (head + wrist images, state,
+task text), episodes end as in training, and the next one starts by itself with a fresh memory.
+
+--expert (PutItBack only) lets the scripted expert drive, exactly as when it records demos
+(--noise adds the recovery-demo action noise); scripts/watch_expert.sh sets it up.
+
 --selftest drives a fixed key sequence instead of waiting for a browser, then a scripted
 Xbox gamepad sequence and a leader-arm pose, checks that the robot moved the right way,
 saves the frames and exits.
@@ -49,11 +56,16 @@ parser.add_argument("--task", default="XLeRobot-Sandbox-v0")
 parser.add_argument("--port", type=int, default=None, help="default: 20000 + uid % 20000, next free one if taken")
 parser.add_argument("--bind", default="0.0.0.0")
 parser.add_argument("--max_fps", type=float, default=30.0)
-parser.add_argument("--jpeg_quality", type=int, default=80)
+parser.add_argument("--jpeg_quality", type=int, default=92, help="stream quality; higher is sharper, more bandwidth")
+parser.add_argument("--chase_size", type=int, nargs=2, default=(1280, 720), metavar=("W", "H"),
+                    help="chase-camera resolution (the robot's own cameras stay as the policy sees them)")
 parser.add_argument("--deadzone", type=float, default=0.15)
 parser.add_argument("--token", default=None)
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--selftest", action="store_true", help="scripted keys, no browser; prints PASS/FAIL")
+parser.add_argument("--policy", default=None, help="checkpoint .../pretrained_model: a trained policy drives the robot")
+parser.add_argument("--expert", action="store_true", help="the PutItBack scripted expert drives the robot")
+parser.add_argument("--noise", action="store_true", help="with --expert: the recovery-demo action noise")
 parser.add_argument("--leader_calibration", default="calibration/my_leader.json",
                     help="SO-101 leader arm calibration (LeRobot format), relative to the repo. The sim arms "
                          "use the follower calibration in xle_leisaac/robots/calibration.py (ARM_CALIBRATION_FILES)")
@@ -214,15 +226,16 @@ def main():
 
     env_cfg = parse_env_cfg(args.task, device=args.device, num_envs=1)
     env_cfg.seed = args.seed
-    env_cfg.terminations.time_out = None  # teleop runs until you stop it
+    if not (args.policy or args.expert):
+        env_cfg.terminations.time_out = None  # teleop runs until you stop it; policy/expert episodes end as usual
     # No recording here. The env's recorder keeps every step (camera images, the whole scene
     # state) in memory until the episode ends, and a teleop episode never ends: memory grew
     # ~2 GB/min until Slurm killed the job (OUT_OF_MEMORY) and the robot froze.
     env_cfg.recorders = RecorderManagerBaseCfg()
-    env_cfg.scene.chase = CHASE_CAMERA
+    env_cfg.scene.chase = CHASE_CAMERA.replace(width=args.chase_size[0], height=args.chase_size[1])
     if getattr(env_cfg, "chase_camera_offset", None):  # indoor scenes bring their own, closer one
         pos, rot = env_cfg.chase_camera_offset
-        env_cfg.scene.chase = CHASE_CAMERA.replace(offset=TiledCameraCfg.OffsetCfg(pos=pos, rot=rot, convention="world"))
+        env_cfg.scene.chase = env_cfg.scene.chase.replace(offset=TiledCameraCfg.OffsetCfg(pos=pos, rot=rot, convention="world"))
     env = gym.make(args.task, cfg=env_cfg).unwrapped
     obs, _ = env.reset()
     robot = env.scene["robot"]
@@ -242,6 +255,28 @@ def main():
             raise
         leader_to_sim = None
         print(f"[teleop] leader arm input off: {e}")
+    policy = None
+    if args.policy:
+        import xle_policies  # noqa: F401  (registers pi05_mem)
+        from lerobot.policies.factory import make_pre_post_processors
+        from lerobot.utils.control_utils import predict_action
+        from xle_policies.pi05_mem import PI05MemPolicy
+
+        policy = PI05MemPolicy.from_pretrained(args.policy).to("cuda").eval()
+        pre, post = make_pre_post_processors(policy.config, pretrained_path=args.policy)
+        task_text = env_cfg.task_description
+        episode, outcomes = 1, []
+        print(f"[teleop] policy drives: memory={policy.config.memory} from {args.policy}", flush=True)
+    expert = noise = None
+    if args.expert:
+        from xle_leisaac.experts.action_noise import ActionNoise
+        from xle_leisaac.experts.put_it_back_expert import PutItBackExpert
+
+        expert = PutItBackExpert(env)
+        expert.reset()
+        noise = ActionNoise(env) if args.noise else None
+        episode, outcomes = 1, []
+        print(f"[teleop] scripted expert drives{' with recovery noise' if noise else ''}", flush=True)
     print(f"[teleop] env ready: {args.task}, action dim {env.action_manager.total_action_dim}", flush=True)
 
     enc = [int(cv2.IMWRITE_JPEG_QUALITY), args.jpeg_quality]
@@ -273,6 +308,10 @@ def main():
             if do_reset:
                 obs, _ = env.reset()
                 adapter = IsaacTeleopAdapter(current_state(), rest)
+                if policy is not None:
+                    policy.reset()
+                if expert is not None:
+                    expert.reset()
 
             cmd = keyboard_command(pressed, edges)
             pad_info = None
@@ -286,7 +325,25 @@ def main():
             with state.lock:
                 real = dict(state.real_action) if t0 - state.real_action_time < REAL_ACTION_TIMEOUT else None
                 source = state.real_action_source
-            if real:
+            if expert is not None:
+                action = expert.act()[0].cpu().numpy()
+                if noise:
+                    noise.base_enabled = expert.driving and not expert.precise
+                    noise.arm_enabled = not expert.precise
+                w, h = expert.cube_pixels()
+                pad_info = (f"expert episode {episode}: '{expert.step_name}', cube on station {expert.station}, "
+                            f"cube now {w:.0f}x{h:.0f} px at 224 ({'seen' if expert.seen else 'not yet clear'}); "
+                            f"results so far: {', '.join(outcomes[-6:]) or '-'}")
+            elif policy is not None:
+                o = obs["policy"]
+                observation = {f"observation.images.{c}": o[c][0].cpu().numpy() for c in ("head", "left_wrist", "right_wrist")}
+                observation["observation.state"] = sim_to_lerobot_action(o["state"][:1])[0].astype(np.float32)
+                act = predict_action(observation, policy, torch.device("cuda"), pre, post, use_amp=False, task=task_text)
+                action = lerobot_to_sim_action(act.reshape(1, -1))[0].astype(np.float32)
+                station = int(getattr(env, "put_it_back_station", [0])[0]) if hasattr(env, "put_it_back_station") else -1
+                pad_info = (f"policy ({policy.config.memory}) episode {episode}, block on station {station}; "
+                            f"results so far: {', '.join(outcomes[-6:]) or '-'}")
+            elif real:
                 # A real-robot action dict (e.g. from XLeRobot's Joy-Con code): fill in any key it
                 # leaves out from the current state (positions) or zero (base speeds), then convert.
                 current_real = dict(zip(XLEROBOT_ACTION_KEYS, sim_to_lerobot_action(current_state()[None])[0]))
@@ -310,8 +367,21 @@ def main():
                 adapter.set_arm(side, q)
                 leader_arms.append(name)
             with torch.inference_mode():
-                obs, *_ = env.step(torch.as_tensor(action, device=env.device).unsqueeze(0))
+                obs, _, terminated, truncated, _ = env.step(torch.as_tensor(action, device=env.device).unsqueeze(0))
             step += 1
+            if (policy is not None or expert is not None) and (bool(terminated[0]) or bool(truncated[0])):  # env already reset
+                log = env.extras.get("log", {})
+                outcome = next((o for o in ("success", "wrong_station", "dropped", "time_out")
+                                if log.get(f"Episode_Termination/{o}", 0.0) > 0.5), "ended")
+                outcomes.append(outcome)
+                print(f"[teleop] {'expert' if expert else 'policy'} episode {episode}: {outcome}", flush=True)
+                episode += 1
+                if policy is not None:
+                    policy.reset()
+                if expert is not None:
+                    expert.reset()
+                    if noise:
+                        noise.reset()
             observation = dict(zip(XLEROBOT_ACTION_KEYS, (float(v) for v in sim_to_lerobot_action(current_state()[None])[0])))
             with state.lock:
                 state.observation = observation

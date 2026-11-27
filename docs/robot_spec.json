@@ -1,0 +1,804 @@
+{
+ "sources": {
+  "xlerobot_commit": "b017b5e6354bd9f61f4247a920c72622ca0aade0",
+  "so_arm100_commit": "a758567c3978dfeefe282ede0500085a48fe8f78",
+  "teleop_branch": "31d4c7e",
+  "xlerobot_urdf_identical_across_maniskill_isaac_branch": true,
+  "branch_agent_identical": true
+ },
+ "real_robot": {
+  "action_keys": [
+   "left_arm_shoulder_pan.pos",
+   "left_arm_shoulder_lift.pos",
+   "left_arm_elbow_flex.pos",
+   "left_arm_wrist_flex.pos",
+   "left_arm_wrist_roll.pos",
+   "left_arm_gripper.pos",
+   "right_arm_shoulder_pan.pos",
+   "right_arm_shoulder_lift.pos",
+   "right_arm_elbow_flex.pos",
+   "right_arm_wrist_flex.pos",
+   "right_arm_wrist_roll.pos",
+   "right_arm_gripper.pos",
+   "head_motor_1.pos",
+   "head_motor_2.pos",
+   "x.vel",
+   "y.vel",
+   "theta.vel"
+  ]
+ },
+ "xlerobot_sim_model": {
+  "joints": [
+   {
+    "name": "root_x_axis_joint",
+    "type": "prismatic",
+    "parent": "root",
+    "child": "root_arm_1_link_1",
+    "xyz": "0 0 0",
+    "rpy": "0 0 0",
+    "axis": "1 0 0",
+    "lower": "-20",
+    "upper": "20",
+    "effort": "100",
+    "velocity": "0.50"
+   },
+   {
+    "name": "root_y_axis_joint",
+    "type": "prismatic",
+    "parent": "root_arm_1_link_1",
+    "child": "root_arm_1_link_2",
+    "xyz": "0 0 0",
+    "rpy": "0 0 0",
+    "axis": "0 1 0",
+    "lower": "-20",
+    "upper": "20",
+    "effort": "100",
+    "velocity": "0.50"
+   },
+   {
+    "name": "root_z_rotation_joint",
+    "type": "continuous",
+    "parent": "root_arm_1_link_2",
+    "child": "base_link",
+    "xyz": "0 0 0",
+    "rpy": "0 0 0",
+    "axis": "0 0 1",
+    "lower": null,
+    "upper": null,
+    "effort": null,
+    "velocity": null
+   },
+   {
+    "name": "Rotation",
+    "type": "revolute",
+    "parent": "Base",
+    "child": "Rotation_Pitch",
+    "xyz": "0 -0.0452 0.0165",
+    "rpy": "1.5708 0 0",
+    "axis": "0 -1 0",
+    "lower": "-2.1",
+    "upper": "2.1",
+    "effort": "0",
+    "velocity": "0"
+   },
+   {
+    "name": "Pitch",
+    "type": "revolute",
+    "parent": "Rotation_Pitch",
+    "child": "Upper_Arm",
+    "xyz": "0 0.1025 0.0306",
+    "rpy": "1.5708 0 0",
+    "axis": "-1 0 0",
+    "lower": "-0.1",
+    "upper": "3.45",
+    "effort": "0",
+    "velocity": "0"
+   },
+   {
+    "name": "Elbow",
+    "type": "revolute",
+    "parent": "Upper_Arm",
+    "child": "Lower_Arm",
+    "xyz": "0 0.11257 0.028",
+    "rpy": "-1.5708 0 0",
+    "axis": "1 0 0",
+    "lower": "-0.2",
+    "upper": "3.14159",
+    "effort": "0",
+    "velocity": "0"
+   },
+   {
+    "name": "Wrist_Pitch",
+    "type": "revolute",
+    "parent": "Lower_Arm",
+    "child": "Wrist_Pitch_Roll",
+    "xyz": "0 0.0052 0.1349",
+    "rpy": "-1.5708 0 0",
+    "axis": "1 0 0",
+    "lower": "-1.8",
+    "upper": "1.8",
+    "effort": "0",
+    "velocity": "0"
+   },
+   {
+    "name": "Wrist_Roll",
+    "type": "revolute",
+    "parent": "Wrist_Pitch_Roll",
+    "child": "Fixed_Jaw",
+    "xyz": "0 -0.0601 0",
+    "rpy": "0 1.5708 0",
+    "axis": "0 -1 0",
+    "lower": "-3.14159",
+    "upper": "3.14159",
+    "effort": "0",
+    "velocity": "0"
+   },
+   {
+    "name": "Jaw",
+    "type": "revolute",
+    "parent": "Fixed_Jaw",
+    "child": "Moving_Jaw",
+    "xyz": "-0.0202 -0.0244 0",
+    "rpy": "3.1416 0 3.33",
+    "axis": "0 0 1",
+    "lower": "0",
+    "upper": "1.7",
+    "effort": "0",
+    "velocity": "0"
+   },
+   {
+    "name": "Rotation_2",
+    "type": "revolute",
+    "parent": "Base_2",
+    "child": "Rotation_Pitch_2",
+    "xyz": "0 -0.0452 0.0165",
+    "rpy": "1.5708 0 0",
+    "axis": "0 -1 0",
+    "lower": "-2.1",
+    "upper": "2.1",
+    "effort": "0",
+    "velocity": "0"
+   },
+   {
+    "name": "Pitch_2",
+    "type": "revolute",
+    "parent": "Rotation_Pitch_2",
+    "child": "Upper_Arm_2",
+    "xyz": "0 0.1025 0.0306",
+    "rpy": "1.5708 0 0",
+    "axis": "-1 0 0",
+    "lower": "-0.1",
+    "upper": "3.45",
+    "effort": "0",
+    "velocity": "0"
+   },
+   {
+    "name": "Elbow_2",
+    "type": "revolute",
+    "parent": "Upper_Arm_2",
+    "child": "Lower_Arm_2",
+    "xyz": "0 0.11257 0.028",
+    "rpy": "-1.5708 0 0",
+    "axis": "1 0 0",
+    "lower": "-0.2",
+    "upper": "3.14159",
+    "effort": "0",
+    "velocity": "0"
+   },
+   {
+    "name": "Wrist_Pitch_2",
+    "type": "revolute",
+    "parent": "Lower_Arm_2",
+    "child": "Wrist_Pitch_Roll_2",
+    "xyz": "0 0.0052 0.1349",
+    "rpy": "-1.5708 0 0",
+    "axis": "1 0 0",
+    "lower": "-1.8",
+    "upper": "1.8",
+    "effort": "0",
+    "velocity": "0"
+   },
+   {
+    "name": "Wrist_Roll_2",
+    "type": "revolute",
+    "parent": "Wrist_Pitch_Roll_2",
+    "child": "Fixed_Jaw_2",
+    "xyz": "0 -0.0601 0",
+    "rpy": "0 1.5708 0",
+    "axis": "0 -1 0",
+    "lower": "-3.14159",
+    "upper": "3.14159",
+    "effort": "0",
+    "velocity": "0"
+   },
+   {
+    "name": "Jaw_2",
+    "type": "revolute",
+    "parent": "Fixed_Jaw_2",
+    "child": "Moving_Jaw_2",
+    "xyz": "-0.0202 -0.0244 0",
+    "rpy": "3.1416 0 3.33",
+    "axis": "0 0 1",
+    "lower": "0",
+    "upper": "1.7",
+    "effort": "0",
+    "velocity": "0"
+   },
+   {
+    "name": "head_pan_joint",
+    "type": "revolute",
+    "parent": "top_base_link",
+    "child": "head_pan_link",
+    "xyz": "-0.178 0 0",
+    "rpy": "0 0 0",
+    "axis": "0 0 1",
+    "lower": "-1.57",
+    "upper": "1.57",
+    "effort": "0.32",
+    "velocity": "1.57"
+   },
+   {
+    "name": "head_tilt_joint",
+    "type": "revolute",
+    "parent": "head_pan_link",
+    "child": "head_tilt_link",
+    "xyz": "0.031 0 0.43815",
+    "rpy": "0 0 0",
+    "axis": "0 1 0",
+    "lower": "-0.76",
+    "upper": "1.45",
+    "effort": "0.68",
+    "velocity": "1.57"
+   }
+  ],
+  "zero_pose_positions_m": {
+   "right arm mount (`Base`)": [
+    -0.135,
+    -0.133,
+    0.76
+   ],
+   "left arm mount (`Base_2`)": [
+    -0.135,
+    0.133,
+    0.76
+   ],
+   "right shoulder pan axis point": [
+    -0.0898,
+    -0.133,
+    0.7765
+   ],
+   "right shoulder lift axis point": [
+    -0.0592,
+    -0.133,
+    0.879
+   ],
+   "left shoulder pan axis point": [
+    -0.0898,
+    0.133,
+    0.7765
+   ],
+   "left shoulder lift axis point": [
+    -0.0592,
+    0.133,
+    0.879
+   ],
+   "right jaw (`Fixed_Jaw`)": [
+    0.2484,
+    -0.133,
+    0.8562
+   ],
+   "left jaw (`Fixed_Jaw_2`)": [
+    0.2484,
+    0.133,
+    0.8562
+   ],
+   "right wrist camera (`Right_Arm_Camera`)": [
+    0.2684,
+    -0.083,
+    0.8562
+   ],
+   "left wrist camera (`Left_Arm_Camera`)": [
+    0.2684,
+    0.183,
+    0.8562
+   ],
+   "head pan axis point": [
+    -0.178,
+    0.0,
+    0.73
+   ],
+   "head tilt axis point": [
+    -0.147,
+    0.0,
+    1.1682
+   ],
+   "head camera (`head_camera_link`)": [
+    -0.092,
+    0.0,
+    1.1906
+   ]
+  },
+  "joint_origin_distances_m": {
+   "Rotation->Pitch": 0.10697013601935822,
+   "Pitch->Elbow": 0.11600002112068772,
+   "Elbow->Wrist_Pitch": 0.13500018518505813,
+   "Wrist_Pitch->Wrist_Roll": 0.06010000000000006,
+   "Wrist_Roll->Jaw": 0.03167648970451115
+  },
+  "masses_kg": {
+   "root": 0.0,
+   "root_arm_1_link_1": 0.0,
+   "root_arm_1_link_2": 0.0,
+   "base_link": 70.1294,
+   "Base": 0.193184127927598,
+   "Rotation_Pitch": 0.119226314127197,
+   "Upper_Arm": 0.162409284599177,
+   "Lower_Arm": 0.147967774582291,
+   "Wrist_Pitch_Roll": 0.066132067097723,
+   "Fixed_Jaw": 0.0929859131176897,
+   "Moving_Jaw": 0.0202443794940372,
+   "Fixed_Jaw_tip": 0.0,
+   "Moving_Jaw_tip": 0.0,
+   "Right_Arm_Camera": 0.0,
+   "Base_2": 0.193184127927598,
+   "Rotation_Pitch_2": 0.119226314127197,
+   "Upper_Arm_2": 0.162409284599177,
+   "Lower_Arm_2": 0.147967774582291,
+   "Wrist_Pitch_Roll_2": 0.066132067097723,
+   "Fixed_Jaw_2": 0.0929859131176897,
+   "Moving_Jaw_2": 0.0202443794940372,
+   "Fixed_Jaw_tip_2": 0.0,
+   "Moving_Jaw_tip_2": 0.0,
+   "Left_Arm_Camera": 0.0,
+   "top_base_link": 4.3542,
+   "head_pan_link": 2.2556,
+   "head_tilt_link": 0.9087,
+   "head_camera_link": 0.0,
+   "head_camera_rgb_frame": 0.0,
+   "head_camera_rgb_optical_frame": 0.0,
+   "head_camera_depth_frame": 0.0,
+   "head_camera_depth_optical_frame": 0.0
+  }
+ },
+ "so101_official": {
+  "joints": [
+   {
+    "name": "gripper",
+    "type": "revolute",
+    "parent": "gripper_link",
+    "child": "moving_jaw_so101_v1_link",
+    "xyz": "0.0202 0.0188 -0.0234",
+    "rpy": "1.5708 -5.24284e-08 -1.41553e-15",
+    "axis": "0 0 1",
+    "lower": "-0.174533",
+    "upper": "1.74533",
+    "effort": "10",
+    "velocity": "10"
+   },
+   {
+    "name": "wrist_roll",
+    "type": "revolute",
+    "parent": "wrist_link",
+    "child": "gripper_link",
+    "xyz": "5.55112e-17 -0.0611 0.0181",
+    "rpy": "1.5708 0.0486795 3.14159",
+    "axis": "0 0 1",
+    "lower": "-2.74385",
+    "upper": "2.84121",
+    "effort": "10",
+    "velocity": "10"
+   },
+   {
+    "name": "wrist_flex",
+    "type": "revolute",
+    "parent": "lower_arm_link",
+    "child": "wrist_link",
+    "xyz": "-0.1349 0.0052 3.62355e-17",
+    "rpy": "4.02456e-15 8.67362e-16 -1.5708",
+    "axis": "0 0 1",
+    "lower": "-1.65806",
+    "upper": "1.65806",
+    "effort": "10",
+    "velocity": "10"
+   },
+   {
+    "name": "elbow_flex",
+    "type": "revolute",
+    "parent": "upper_arm_link",
+    "child": "lower_arm_link",
+    "xyz": "-0.11257 -0.028 1.73763e-16",
+    "rpy": "-3.63608e-16 8.74301e-16 1.5708",
+    "axis": "0 0 1",
+    "lower": "-1.69",
+    "upper": "1.69",
+    "effort": "10",
+    "velocity": "10"
+   },
+   {
+    "name": "shoulder_lift",
+    "type": "revolute",
+    "parent": "shoulder_link",
+    "child": "upper_arm_link",
+    "xyz": "-0.0303992 -0.0182778 -0.0542",
+    "rpy": "-1.5708 -1.5708 0",
+    "axis": "0 0 1",
+    "lower": "-1.74533",
+    "upper": "1.74533",
+    "effort": "10",
+    "velocity": "10"
+   },
+   {
+    "name": "shoulder_pan",
+    "type": "revolute",
+    "parent": "base_link",
+    "child": "shoulder_link",
+    "xyz": "0.0388353 -8.97657e-09 0.0624",
+    "rpy": "3.14159 4.18253e-17 -3.14159",
+    "axis": "0 0 1",
+    "lower": "-1.91986",
+    "upper": "1.91986",
+    "effort": "10",
+    "velocity": "10"
+   }
+  ],
+  "joint_origin_distances_m": {
+   "shoulder_pan->shoulder_lift": 0.06477522160116475,
+   "shoulder_lift->elbow_flex": 0.11600002112068772,
+   "elbow_flex->wrist_flex": 0.13500018518505816,
+   "wrist_flex->wrist_roll": 0.0637245635528404,
+   "wrist_roll->gripper": 0.036180657816021006
+  },
+  "zero_pose_positions_m": {
+   "shoulder pan axis point": [
+    0.0388,
+    -0.0,
+    0.0624
+   ],
+   "shoulder lift axis point": [
+    0.0692,
+    -0.0183,
+    0.1166
+   ],
+   "tool point (`gripper_frame_link`)": [
+    0.3914,
+    -0.0,
+    0.2265
+   ],
+   "wrist camera (`wrist_camera_link`)": [
+    0.2866,
+    0.0731,
+    0.2404
+   ]
+  },
+  "masses_kg": {
+   "base_link": 0.147,
+   "shoulder_link": 0.100006,
+   "upper_arm_link": 0.103,
+   "lower_arm_link": 0.104,
+   "wrist_link": 0.079,
+   "gripper_link": 0.087,
+   "gripper_frame_link": 1e-09,
+   "moving_jaw_so101_v1_link": 0.012,
+   "wrist_camera_mount_link": 0.02,
+   "wrist_camera_link": 0.015
+  }
+ },
+ "isaac_model": {
+  "arm_mounts_m": {
+   "left": [
+    -0.1286,
+    0.133,
+    0.7624
+   ],
+   "right": [
+    -0.1286,
+    -0.133,
+    0.7624
+   ]
+  },
+  "joints": [
+   {
+    "name": "root_x_axis_joint",
+    "type": "prismatic",
+    "parent": "root",
+    "child": "root_arm_1_link_1",
+    "xyz": "0 0 0",
+    "rpy": "0 0 0",
+    "axis": "1 0 0",
+    "lower": "-20",
+    "upper": "20",
+    "effort": "100",
+    "velocity": "0.50"
+   },
+   {
+    "name": "root_y_axis_joint",
+    "type": "prismatic",
+    "parent": "root_arm_1_link_1",
+    "child": "root_arm_1_link_2",
+    "xyz": "0 0 0",
+    "rpy": "0 0 0",
+    "axis": "0 1 0",
+    "lower": "-20",
+    "upper": "20",
+    "effort": "100",
+    "velocity": "0.50"
+   },
+   {
+    "name": "root_z_rotation_joint",
+    "type": "continuous",
+    "parent": "root_arm_1_link_2",
+    "child": "base_link",
+    "xyz": "0 0 0",
+    "rpy": "0 0 0",
+    "axis": "0 0 1",
+    "lower": null,
+    "upper": null,
+    "effort": null,
+    "velocity": null
+   },
+   {
+    "name": "head_pan_joint",
+    "type": "revolute",
+    "parent": "top_base_link",
+    "child": "head_pan_link",
+    "xyz": "-0.178 0 0",
+    "rpy": "0 0 0",
+    "axis": "0 0 1",
+    "lower": "-1.57",
+    "upper": "1.57",
+    "effort": "0.32",
+    "velocity": "1.57"
+   },
+   {
+    "name": "head_tilt_joint",
+    "type": "revolute",
+    "parent": "head_pan_link",
+    "child": "head_tilt_link",
+    "xyz": "0.031 0 0.43815",
+    "rpy": "0 0 0",
+    "axis": "0 1 0",
+    "lower": "-0.76",
+    "upper": "1.45",
+    "effort": "0.68",
+    "velocity": "1.57"
+   },
+   {
+    "name": "left_arm_gripper",
+    "type": "revolute",
+    "parent": "left_arm_gripper_link",
+    "child": "left_arm_moving_jaw_so101_v1_link",
+    "xyz": "0.0202 0.0188 -0.0234",
+    "rpy": "1.5708 -5.24284e-08 -1.41553e-15",
+    "axis": "0 0 1",
+    "lower": "-0.174533",
+    "upper": "1.74533",
+    "effort": "10",
+    "velocity": "10"
+   },
+   {
+    "name": "left_arm_wrist_roll",
+    "type": "revolute",
+    "parent": "left_arm_wrist_link",
+    "child": "left_arm_gripper_link",
+    "xyz": "5.55112e-17 -0.0611 0.0181",
+    "rpy": "1.5708 0.0486795 3.14159",
+    "axis": "0 0 1",
+    "lower": "-2.74385",
+    "upper": "2.84121",
+    "effort": "10",
+    "velocity": "10"
+   },
+   {
+    "name": "left_arm_wrist_flex",
+    "type": "revolute",
+    "parent": "left_arm_lower_arm_link",
+    "child": "left_arm_wrist_link",
+    "xyz": "-0.1349 0.0052 3.62355e-17",
+    "rpy": "4.02456e-15 8.67362e-16 -1.5708",
+    "axis": "0 0 1",
+    "lower": "-1.65806",
+    "upper": "1.65806",
+    "effort": "10",
+    "velocity": "10"
+   },
+   {
+    "name": "left_arm_elbow_flex",
+    "type": "revolute",
+    "parent": "left_arm_upper_arm_link",
+    "child": "left_arm_lower_arm_link",
+    "xyz": "-0.11257 -0.028 1.73763e-16",
+    "rpy": "-3.63608e-16 8.74301e-16 1.5708",
+    "axis": "0 0 1",
+    "lower": "-1.69",
+    "upper": "1.69",
+    "effort": "10",
+    "velocity": "10"
+   },
+   {
+    "name": "left_arm_shoulder_lift",
+    "type": "revolute",
+    "parent": "left_arm_shoulder_link",
+    "child": "left_arm_upper_arm_link",
+    "xyz": "-0.0303992 -0.0182778 -0.0542",
+    "rpy": "-1.5708 -1.5708 0",
+    "axis": "0 0 1",
+    "lower": "-1.74533",
+    "upper": "1.74533",
+    "effort": "10",
+    "velocity": "10"
+   },
+   {
+    "name": "left_arm_shoulder_pan",
+    "type": "revolute",
+    "parent": "left_arm_base_link",
+    "child": "left_arm_shoulder_link",
+    "xyz": "0.0388353 -8.97657e-09 0.0624",
+    "rpy": "3.14159 4.18253e-17 -3.14159",
+    "axis": "0 0 1",
+    "lower": "-1.91986",
+    "upper": "1.91986",
+    "effort": "10",
+    "velocity": "10"
+   },
+   {
+    "name": "right_arm_gripper",
+    "type": "revolute",
+    "parent": "right_arm_gripper_link",
+    "child": "right_arm_moving_jaw_so101_v1_link",
+    "xyz": "0.0202 0.0188 -0.0234",
+    "rpy": "1.5708 -5.24284e-08 -1.41553e-15",
+    "axis": "0 0 1",
+    "lower": "-0.174533",
+    "upper": "1.74533",
+    "effort": "10",
+    "velocity": "10"
+   },
+   {
+    "name": "right_arm_wrist_roll",
+    "type": "revolute",
+    "parent": "right_arm_wrist_link",
+    "child": "right_arm_gripper_link",
+    "xyz": "5.55112e-17 -0.0611 0.0181",
+    "rpy": "1.5708 0.0486795 3.14159",
+    "axis": "0 0 1",
+    "lower": "-2.74385",
+    "upper": "2.84121",
+    "effort": "10",
+    "velocity": "10"
+   },
+   {
+    "name": "right_arm_wrist_flex",
+    "type": "revolute",
+    "parent": "right_arm_lower_arm_link",
+    "child": "right_arm_wrist_link",
+    "xyz": "-0.1349 0.0052 3.62355e-17",
+    "rpy": "4.02456e-15 8.67362e-16 -1.5708",
+    "axis": "0 0 1",
+    "lower": "-1.65806",
+    "upper": "1.65806",
+    "effort": "10",
+    "velocity": "10"
+   },
+   {
+    "name": "right_arm_elbow_flex",
+    "type": "revolute",
+    "parent": "right_arm_upper_arm_link",
+    "child": "right_arm_lower_arm_link",
+    "xyz": "-0.11257 -0.028 1.73763e-16",
+    "rpy": "-3.63608e-16 8.74301e-16 1.5708",
+    "axis": "0 0 1",
+    "lower": "-1.69",
+    "upper": "1.69",
+    "effort": "10",
+    "velocity": "10"
+   },
+   {
+    "name": "right_arm_shoulder_lift",
+    "type": "revolute",
+    "parent": "right_arm_shoulder_link",
+    "child": "right_arm_upper_arm_link",
+    "xyz": "-0.0303992 -0.0182778 -0.0542",
+    "rpy": "-1.5708 -1.5708 0",
+    "axis": "0 0 1",
+    "lower": "-1.74533",
+    "upper": "1.74533",
+    "effort": "10",
+    "velocity": "10"
+   },
+   {
+    "name": "right_arm_shoulder_pan",
+    "type": "revolute",
+    "parent": "right_arm_base_link",
+    "child": "right_arm_shoulder_link",
+    "xyz": "0.0388353 -8.97657e-09 0.0624",
+    "rpy": "3.14159 4.18253e-17 -3.14159",
+    "axis": "0 0 1",
+    "lower": "-1.91986",
+    "upper": "1.91986",
+    "effort": "10",
+    "velocity": "10"
+   }
+  ],
+  "zero_pose_positions_m": {
+   "left shoulder pan axis point": [
+    -0.0898,
+    0.133,
+    0.8248
+   ],
+   "left shoulder lift axis point": [
+    -0.0594,
+    0.1147,
+    0.879
+   ],
+   "right shoulder pan axis point": [
+    -0.0898,
+    -0.133,
+    0.8248
+   ],
+   "right shoulder lift axis point": [
+    -0.0594,
+    -0.1513,
+    0.879
+   ],
+   "left tool point": [
+    0.2627,
+    0.133,
+    0.9889
+   ],
+   "right tool point": [
+    0.2627,
+    -0.133,
+    0.9889
+   ],
+   "left wrist camera link": [
+    0.158,
+    0.2061,
+    1.0028
+   ],
+   "right wrist camera link": [
+    0.158,
+    -0.0599,
+    1.0028
+   ],
+   "head camera (`head_camera_link`)": [
+    -0.092,
+    0.0,
+    1.1906
+   ]
+  },
+  "masses_kg": {
+   "root": 0.001,
+   "root_arm_1_link_1": 0.001,
+   "root_arm_1_link_2": 0.001,
+   "base_link": 5.8538,
+   "top_base_link": 4.3542,
+   "head_pan_link": 0.25,
+   "head_tilt_link": 0.2,
+   "head_camera_link": 0.001,
+   "head_camera_rgb_frame": 0.001,
+   "head_camera_rgb_optical_frame": 0.001,
+   "head_camera_depth_frame": 0.001,
+   "head_camera_depth_optical_frame": 0.001,
+   "left_arm_base_link": 0.147,
+   "left_arm_shoulder_link": 0.100006,
+   "left_arm_upper_arm_link": 0.103,
+   "left_arm_lower_arm_link": 0.104,
+   "left_arm_wrist_link": 0.079,
+   "left_arm_gripper_link": 0.087,
+   "left_arm_gripper_frame_link": 1e-09,
+   "left_arm_moving_jaw_so101_v1_link": 0.012,
+   "left_arm_wrist_camera_mount_link": 0.02,
+   "left_arm_wrist_camera_link": 0.015,
+   "right_arm_base_link": 0.147,
+   "right_arm_shoulder_link": 0.100006,
+   "right_arm_upper_arm_link": 0.103,
+   "right_arm_lower_arm_link": 0.104,
+   "right_arm_wrist_link": 0.079,
+   "right_arm_gripper_link": 0.087,
+   "right_arm_gripper_frame_link": 1e-09,
+   "right_arm_moving_jaw_so101_v1_link": 0.012,
+   "right_arm_wrist_camera_mount_link": 0.02,
+   "right_arm_wrist_camera_link": 0.015
+  }
+ }
+}
