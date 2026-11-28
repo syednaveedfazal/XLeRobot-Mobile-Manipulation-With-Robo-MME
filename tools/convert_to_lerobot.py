@@ -24,14 +24,20 @@ parser.add_argument("--hdf5_file", nargs="+", default=[os.path.join(os.environ["
                     help="one or more HDF5 files, all in the same folder (merged into one dataset)")
 parser.add_argument("--repo_id", default="local/xle_sandbox_v0")
 parser.add_argument("--task", default="XLeRobot-Sandbox-v0", help="gym id the HDF5 was recorded with")
-parser.add_argument("--overwrite", action="store_true", help="delete an existing dataset with this repo_id first")
+parser.add_argument("--overwrite", action="store_true", help="move an existing dataset with this repo_id to _archive/ first")
 args = parser.parse_args()
 
 target = os.path.join(os.environ["HF_LEROBOT_HOME"], args.repo_id)
 if os.path.exists(target):
     if not args.overwrite:
         sys.exit(f"{target} already exists; pass --overwrite to replace it")
-    shutil.rmtree(target)
+    # Never delete a dataset (CLAUDE.md rule 3): move the old one to $HF_LEROBOT_HOME/_archive/.
+    import time
+
+    old = os.path.join(os.environ["HF_LEROBOT_HOME"], "_archive", f"{args.repo_id.replace('/', '_')}_{time.strftime('%Y%m%d_%H%M%S')}")
+    os.makedirs(os.path.dirname(old), exist_ok=True)
+    shutil.move(target, old)
+    print(f"[convert] moved the old dataset to {old}", flush=True)
 
 folders = {os.path.dirname(f) for f in args.hdf5_file}
 if len(folders) != 1:

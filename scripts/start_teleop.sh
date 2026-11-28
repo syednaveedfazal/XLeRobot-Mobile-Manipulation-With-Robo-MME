@@ -11,7 +11,7 @@ PARTITION="${PARTITION:-mlgpu_devel}"
 TIME="${TIME:-01:00:00}"
 
 SBATCH_SCRIPT="${SBATCH_SCRIPT:-scripts/teleop.sbatch}"  # Isaac Lab: slurm/teleop_isaac.sbatch
-JOB=$(sbatch --parsable --partition="$PARTITION" --time="$TIME" "$SBATCH_SCRIPT" "$@")
+JOB=$(sbatch --parsable --partition="$PARTITION" --time="$TIME" ${SBATCH_EXTRA:-} "$SBATCH_SCRIPT" "$@")  # SBATCH_EXTRA: e.g. --mem=48G
 LOG="logs/teleop-$JOB.out"
 echo "submitted job $JOB on $PARTITION ($TIME). log: $LOG"
 

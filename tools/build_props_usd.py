@@ -8,12 +8,12 @@ builds them out of boxes:
   top that the SO-101 gripper holds. The jaws close like tweezers (a V that meets at the tips),
   so they grip the knob near their tips and are closed only a little past touching it.
   It can hide a 3.5 cm cube underneath, which is what memory tasks need.
-- cube.usd: the PutItBack object, a small 2 x 2 x 4 cm upright block that looks like a 2x2x4
-  Rubik's cuboid (1 cm coloured stickers, visual only, on a black core that is the collider),
-  60 g (about a real 2x2x4 puzzle) with its centre of mass low so it stands steadily. Its shape is what the SO-101 can
-  hold: the jaws close like tweezers with rounded tips, so they need something about 2 cm
-  across (wider gets squeezed out sideways) that rises well above the tips (a 2 cm cube on a
-  table is only touched by the rounded tips and slips out).
+- cube.usd: the PutItBack object, a box with a handle: a 6 cm Rubik's-style box (3 x 3
+  coloured stickers per face, visual only, on a black core that is the collider) with a
+  bright red 2 x 2 x 4 cm handle on top, 80 g, centre of mass low. The box makes it easy to
+  see (a 2 cm block was only 2-3 px in pi0.5's 224 px input); the handle is what the SO-101
+  holds: its tweezer-like jaws need something about 2 cm across that rises well above their
+  rounded tips.
 - work_table.usd: static table, 60 x 40 cm top at 70 cm (like the lab's), on four legs.
 
 Each prop's origin is at the centre of its bottom face.
@@ -34,7 +34,7 @@ WALL = 0.006  # 6 mm walls
 
 
 def make_prop(path, boxes, mass, color, rigid=True, visuals=(), center_of_mass=None):
-    """boxes: list of (name, centre xyz, size xyz) in metres, each a collider.
+    """boxes: list of (name, centre xyz, size xyz[, colour]) in metres, each a collider.
 
     rigid=False makes a static prop (colliders only, no rigid body). visuals: extra
     (name, centre, size, colour) boxes that are seen but do not collide.
@@ -63,12 +63,12 @@ def make_prop(path, boxes, mass, color, rigid=True, visuals=(), center_of_mass=N
     physx = PhysxSchema.PhysxMaterialAPI.Apply(material.GetPrim())
     physx.CreateFrictionCombineModeAttr().Set("max")
     physx.CreateRestitutionCombineModeAttr().Set("min")
-    for name, centre, size in boxes:
+    for name, centre, size, *own_color in boxes:
         cube = UsdGeom.Cube.Define(stage, f"/prop/{name}")
         cube.CreateSizeAttr(1.0)
         cube.AddTranslateOp().Set(Gf.Vec3d(*centre))
         cube.AddScaleOp().Set(Gf.Vec3f(*size))
-        cube.CreateDisplayColorAttr([Gf.Vec3f(*color)])
+        cube.CreateDisplayColorAttr([Gf.Vec3f(*(own_color[0] if own_color else color))])
         UsdPhysics.CollisionAPI.Apply(cube.GetPrim())
         UsdShade.MaterialBindingAPI.Apply(cube.GetPrim()).Bind(material, materialPurpose="physics")
     for name, centre, size, rgb in visuals:
@@ -94,14 +94,16 @@ def open_box(width, height, closed_at_top):
     ]
 
 
-BLOCK = (0.02, 0.02, 0.04)  # x, y, z (m); keep in sync with BLOCK_SIZE in xle_leisaac/tasks/put_it_back_env_cfg.py
+BOX = 0.06  # edge of the box (m); keep in sync with BOX_SIZE in xle_leisaac/tasks/put_it_back_env_cfg.py
+HANDLE = (0.02, 0.02, 0.04)  # on top of the box; keep in sync with HANDLE_SIZE there
+HANDLE_COLOUR = (0.9, 0.05, 0.05)
 STICKER_COLOURS = {  # face normal -> colour, standard Rubik's scheme
     (0, 0, 1): (0.95, 0.95, 0.95), (0, 0, -1): (1.0, 0.85, 0.0), (1, 0, 0): (0.8, 0.05, 0.05),
     (-1, 0, 0): (1.0, 0.45, 0.0), (0, 1, 0): (0.0, 0.3, 0.8), (0, -1, 0): (0.0, 0.6, 0.2),
 }
 
 
-def rubiks_stickers(size, cell=0.01):
+def rubiks_stickers(size, cell=0.02):
     """Thin coloured cell-sized stickers on each face of a box whose bottom centre is the origin."""
     thick, out = 0.0006, []
     for normal, rgb in STICKER_COLOURS.items():
@@ -134,8 +136,12 @@ def main():
     make_prop(os.path.join(OUT_DIR, "bin.usd"), open_box(0.14, 0.07, closed_at_top=False), 0.15, (0.2, 0.35, 0.8))
     cup = open_box(0.065, 0.07, closed_at_top=True) + [("knob", (0, 0, 0.09), (0.02, 0.02, 0.04))]
     make_prop(os.path.join(OUT_DIR, "cup.usd"), cup, 0.08, (0.85, 0.55, 0.15))
-    make_prop(os.path.join(OUT_DIR, "cube.usd"), [("core", (0, 0, BLOCK[2] / 2), BLOCK)], 0.06, (0.03, 0.03, 0.03),
-              visuals=rubiks_stickers(BLOCK), center_of_mass=(0, 0, 0.007))
+    box_with_handle = [
+        ("core", (0, 0, BOX / 2), (BOX, BOX, BOX)),
+        ("handle", (0, 0, BOX + HANDLE[2] / 2), HANDLE, HANDLE_COLOUR),
+    ]
+    make_prop(os.path.join(OUT_DIR, "cube.usd"), box_with_handle, 0.08, (0.03, 0.03, 0.03),
+              visuals=rubiks_stickers((BOX, BOX, BOX)), center_of_mass=(0, 0, 0.025))
     make_prop(os.path.join(OUT_DIR, "work_table.usd"), work_table(), 0.0, (0.55, 0.38, 0.22), rigid=False)
 
 

@@ -39,6 +39,7 @@ parser.add_argument("--tokens_per_frame", type=int, default=16)
 parser.add_argument("--pool", default="mean", choices=["mean", "max"])
 parser.add_argument("--out", default=None, help="default <dataset root>/memory_features/<camera>")
 parser.add_argument("--batch_size", type=int, default=64)
+parser.add_argument("--pad_black", type=int, default=1, help="1: pad the 224 px letterbox with black (as new training runs do)")
 parser.add_argument("--num_workers", type=int, default=8)
 args = parser.parse_args()
 
@@ -67,6 +68,7 @@ cfg = PI05MemConfig(
     dtype=args.dtype,
     device="cuda" if torch.cuda.is_available() else "cpu",
     pretrained_path=args.pretrained_path,
+    pad_black=bool(args.pad_black),
 )
 cfg.output_features = {k: f for k, f in features.items() if f.type is FeatureType.ACTION}
 cfg.input_features = {k: f for k, f in features.items() if k not in cfg.output_features}
@@ -112,6 +114,7 @@ meta = {
     "source_weights": args.pretrained_path,
     "dtype": args.dtype,
     "image_resolution": list(cfg.image_resolution),
+    "pad_black": bool(args.pad_black),
     "built": time.strftime("%Y-%m-%d %H:%M:%S"),
 }
 (out / "meta.json").write_text(json.dumps(meta, indent=2))

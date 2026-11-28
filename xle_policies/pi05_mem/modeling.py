@@ -20,6 +20,7 @@ from torch import Tensor
 
 from lerobot.configs.policies import PreTrainedConfig
 from lerobot.policies.pi05.configuration_pi05 import PI05Config
+from lerobot.policies.pi05 import modeling_pi05
 from lerobot.policies.pi05.modeling_pi05 import PI05Policy, resize_with_pad_torch
 
 from .configuration import PI05MemConfig
@@ -28,12 +29,22 @@ from .memory import MemoryFeatureCache, build_memory, frame_sampling_indices, im
 MEMORY_PREFIX = "model.memory."
 
 
+def resize_with_pad_black(images: Tensor, height: int, width: int, mode: str = "bilinear") -> Tensor:
+    """resize_with_pad_torch for [0, 1] float images, padding with black (0) instead of -1."""
+    if images.dtype != torch.float32:
+        return resize_with_pad_torch(images, height, width, mode)
+    return (resize_with_pad_torch(images * 2.0 - 1.0, height, width, mode) + 1.0) / 2.0
+
+
 class PI05MemPolicy(PI05Policy):
     config_class = PI05MemConfig
     name = "pi05_mem"
 
     def __init__(self, config: PI05MemConfig):
         super().__init__(config)
+        self._resize = resize_with_pad_black if config.pad_black else resize_with_pad_torch
+        if config.pad_black:  # LeRobot's pi05 preprocessing looks the function up in its module
+            modeling_pi05.resize_with_pad_torch = resize_with_pad_black
         if config.freeze_vision_encoder:
             pg = self.model.paligemma_with_expert.paligemma.model
             for p in [*pg.vision_tower.parameters(), *pg.multi_modal_projector.parameters()]:
@@ -71,7 +82,7 @@ class PI05MemPolicy(PI05Policy):
         device = next(self.model.paligemma_with_expert.paligemma.parameters()).device
         img = images.to(device=device, dtype=torch.float32).permute(0, 2, 3, 1)  # pi05 preprocessing
         if tuple(img.shape[1:3]) != tuple(self.config.image_resolution):
-            img = resize_with_pad_torch(img, *self.config.image_resolution)
+            img = self._resize(img, *self.config.image_resolution)
         img = (img * 2.0 - 1.0).permute(0, 3, 1, 2)
         tokens = self.model.paligemma_with_expert.embed_image(img)
         tokens = pool_tokens(tokens.float(), self.config.memory_tokens_per_frame, self.config.memory_pool)
@@ -104,8 +115,10 @@ class PI05MemPolicy(PI05Policy):
             "tokens_per_frame": self.config.memory_tokens_per_frame,
             "pool": self.config.memory_pool,
             "dim": image_feature_dim(self.model),
+            "pad_black": self.config.pad_black,
         }
-        bad = {k: (m.get(k), v) for k, v in want.items() if m.get(k) != v}
+        bad = {k: (m.get(k, False if k == "pad_black" else None), v) for k, v in want.items()
+               if m.get(k, False if k == "pad_black" else None) != v}
         if bad:
             raise ValueError(f"memory cache {self.config.memory_feature_dir} does not match the policy: {bad}")
         if m.get("source_weights") != self.config.pretrained_path:

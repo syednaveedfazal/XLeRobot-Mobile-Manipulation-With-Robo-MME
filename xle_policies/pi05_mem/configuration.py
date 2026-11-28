@@ -43,6 +43,11 @@ class PI05MemConfig(PI05Config):
     # RoboMME freezes the vision encoder for all variants, the baseline included. With
     # memory it must stay frozen: cached history features come from these weights.
     freeze_vision_encoder: bool = True
+    # Pad the 224 px letterbox with black. LeRobot 0.4.2 pads the [0, 1] images with -1 (black only
+    # for [-1, 1] images) and rescales afterwards (x * 2 - 1), so the bars become -3, outside the range
+    # SigLIP was trained on (98 of 224 rows for a 640x360 camera). Off by default so that runs trained
+    # before 2026-11-24 load and behave as trained; new runs set it (slurm/train_pi05_mem.sbatch).
+    pad_black: bool = False
 
     def __post_init__(self):
         super().__post_init__()

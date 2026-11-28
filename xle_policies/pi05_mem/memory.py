@@ -18,6 +18,7 @@ Modul (integration)
 """
 
 import math
+import os
 from functools import partial
 from pathlib import Path
 
@@ -265,7 +266,11 @@ class MemoryFeatureCache:
                 f"no memory feature cache in {path}; build it with tools/build_memory_cache.py"
             )
         self.meta = json.loads((path / "meta.json").read_text())
-        self.features = np.load(path / "features.npy", mmap_mode="r")
+        # Read it all into RAM (~64 KB per frame, 12.6 GB for 192k frames). Memory-mapped on
+        # Lustre, each training step's scattered reads (batch x 32 frames) left the GPU idle
+        # most of the time. XLE_MEMORY_MMAP=1 keeps the memory map (e.g. on a laptop).
+        mmap = "r" if os.environ.get("XLE_MEMORY_MMAP", "0") == "1" else None
+        self.features = np.load(path / "features.npy", mmap_mode=mmap)
         self.episode_start = np.load(path / "episode_start.npy")
 
     def gather(self, index: Tensor, max_frames: int) -> tuple[Tensor, Tensor, Tensor]:
